@@ -176,5 +176,80 @@ def job_search_form():
 def display_jobs(jobs_data):
     st.subheader("Jobs Found")
     
-    # Display the raw JSON data
-    st.json(jobs_data)
+    # Show number of jobs found
+    total_jobs = len(jobs_data)
+    st.write(f"Found {total_jobs} matching positions")
+    
+    # Add filtering options
+    col1, col2 = st.columns(2)
+    with col1:
+        sort_option = st.selectbox("Sort by", ["Date posted (newest)", "Company name", "Job title"])
+    with col2:
+        filter_remote = st.checkbox("Remote jobs only")
+    
+    # Sort the jobs based on selection
+    if sort_option == "Date posted (newest)":
+        jobs_data = sorted(jobs_data, key=lambda x: x.get("date_posted", ""), reverse=True)
+    elif sort_option == "Company name":
+        jobs_data = sorted(jobs_data, key=lambda x: x.get("organization", "").lower())
+    elif sort_option == "Job title":
+        jobs_data = sorted(jobs_data, key=lambda x: x.get("title", "").lower())
+    
+    # Filter for remote if selected
+    if filter_remote:
+        jobs_data = [job for job in jobs_data if job.get("remote_derived", False)]
+    
+    # Display each job in a card-like format
+    for job in jobs_data:
+        # Create a card with border
+        st.markdown("---")
+        
+        # Job title and company in header
+        title = job.get("title", "Unknown Position")
+        company = job.get("organization", "Unknown Company")
+        st.markdown(f"## {title}")
+        
+        # Company with logo if available
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            logo_url = job.get("organization_logo", "")
+            if logo_url:
+                st.image(logo_url, width=80)
+        with col2:
+            st.markdown(f"**Company:** {company}")
+            
+            # Location information
+            locations = job.get("locations_derived", [])
+            if locations:
+                st.markdown(f"**Location:** {', '.join(locations)}")
+            
+            # Remote indicator
+            if job.get("remote_derived", False):
+                st.markdown("**🏠 Remote position**")
+            
+            # Employment type
+            emp_types = job.get("employment_type", [])
+            if emp_types:
+                st.markdown(f"**Type:** {', '.join(emp_types)}")
+            
+            # Date posted
+            date_posted = job.get("date_posted", "").split("T")[0] if job.get("date_posted", "") else "N/A"
+            st.markdown(f"**Posted:** {date_posted}")
+        
+        # Apply button
+        job_url = job.get("url", "")
+        if job_url:
+            st.markdown(f"[Apply on LinkedIn]({job_url})")
+        
+        # Job description in expander
+        with st.expander("View Full Description"):
+            description = job.get("description_text", "No description available")
+            st.markdown(description)
+        
+        # Save button
+        if st.button(f"Save Job", key=f"save_{job.get('id', '')}"):
+            st.success("Job saved to your profile!")
+    
+    # Add raw data in expander at the bottom for debugging
+    with st.expander("View Raw JSON Data"):
+        st.json(jobs_data)
