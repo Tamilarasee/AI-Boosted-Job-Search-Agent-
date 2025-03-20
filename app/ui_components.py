@@ -20,6 +20,7 @@ def login_form():
                 if response.status_code == 200:
                     st.success("Login successful!")
                     st.session_state.current_page = "user_details"
+                    st.rerun()
                 else:
                     st.error("Login failed. Please check your credentials.")
             except Exception as e:
@@ -27,6 +28,7 @@ def login_form():
 
     if st.button("Sign Up"):
         st.session_state.current_page = "register"
+        
         
 # Function for the registration form
 def registration_form():
@@ -48,6 +50,7 @@ def registration_form():
                     st.success(f"Account created for: {new_email}")
                     st.success("You can now log in with your new account!")
                     st.session_state.current_page = "login"
+                    st.rerun()
                 else:
                     st.error("Registration failed. Please try again.")
             except Exception as e:
@@ -100,23 +103,7 @@ def user_details_form():
     # Put the button outside the submit button condition, but after form processing
     if st.button("Start Job Search"):
         st.session_state.current_page = "job_search"
-            # Check if the insert was successful
-            
-            #     user_id = response.data[0]['id']  # Get the auto-generated user ID
-                
-            #     resume_urls = []
-            #     for resume in resumes:
-            #         # Process each uploaded resume (e.g., save to Supabase)
-            #         public_url = upload_resume_to_supabase(resume, user_id)
-            #         if public_url:
-            #             st.success(f"Uploaded: {resume.name}")
-            #             resume_urls.append(public_url)
-
-            #     # Save resume URLs to the user's record
-            #     if resume_urls:
-            #         supabase.table("users").update({"resume_urls": resume_urls}).eq("id", user_id).execute()
-                
-
+        st.rerun()
 
 # def upload_resume_to_supabase(resume, user_id):
 #     # Upload the resume to Supabase storage
