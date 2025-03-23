@@ -8,8 +8,6 @@ completion = client.chat.completions.create(
             "type": "approximate",
             "approximate": {
                 "country": "US",
-                "city": "Chicago",
-                "region": "Illinois",
             }
         },
     },
