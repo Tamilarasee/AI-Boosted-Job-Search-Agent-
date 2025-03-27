@@ -127,7 +127,7 @@ def job_preferences_form():
         help="e.g., Python, SQL, Machine Learning"
     )
     
-    location_preference = st.text_input(
+    preferred_location = st.text_input(
         "Preferred Locations (comma separated)",
         help="e.g., San Francisco, Remote, New York"
     )
@@ -144,306 +144,58 @@ def job_preferences_form():
     )
 
     # Submit button
-    if st.button("Save Preferences & Continue to Job Search"):
+    if st.button("Search Jobs"):
         if target_roles and primary_skills:
-            # Store preferences in session state
-            st.session_state.user_preferences = {
-                "target_roles": target_roles,
-                "primary_skills": primary_skills,
-                "location_preference": location_preference,
-                "job_type": job_type,
-                "additional_preferences": additional_preferences
-            }
-            
-            # Also save to database if needed
-            try:
-                response = requests.post(
-                    f"{API_URL}/users/preferences",
-                    json={
-                        "user_id": st.session_state.get("user_id", ""),
-                        "target_roles": target_roles,
-                        "primary_skills": primary_skills,
-                        "location_preference": location_preference,
-                        "job_type": job_type,
-                        "additional_preferences": additional_preferences
-                    }
-                )
-                
-                if response.status_code == 200:
-                    st.success("Preferences saved successfully!")
-                    st.session_state.current_page = "job_search"
-                    st.rerun()
-                else:
-                    # Even if DB save fails, we can still continue with session data
-                    st.warning("Could not save preferences to database, but you can still continue.")
-                    st.session_state.current_page = "job_search"
-                    st.rerun()
-            except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-                # Still allow continuing to search
-                st.session_state.current_page = "job_search"
-                st.rerun()
-        else:
-            st.error("Please enter at least one target role and primary skill.")
-
-def job_search_form():
-    st.subheader("Job Search")
-    
-    # Check if user preferences exist in session state
-    if "user_preferences" not in st.session_state:
-        st.warning("Please set your job preferences first.")
-        if st.button("Go to Preferences"):
-            st.session_state.current_page = "job_preferences"
-            st.rerun()
-        return
-    
-    # Display current preferences
-    preferences = st.session_state.user_preferences
-    st.write("### Your Job Preferences")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f"**Target Roles:** {preferences.get('target_roles', '')}")
-        st.write(f"**Primary Skills:** {preferences.get('primary_skills', '')}")
-        st.write(f"**Location:** {preferences.get('location_preference', '')}")
-    
-    with col2:
-        st.write(f"**Job Type:** {', '.join(preferences.get('job_type', []))}")
-        if preferences.get('additional_preferences'):
-            st.write(f"**Additional Preferences:** {preferences.get('additional_preferences', '')}")
-    
-    # Option to modify search
-    st.write("### Refine Your Search")
-    
-    # Simplified search options
-    search_role = st.text_input(
-        "Target Role",
-        value=preferences.get('target_roles', '').split(',')[0]
-    )
-    
-    search_location = st.text_input(
-        "Location",
-        value=preferences.get('location_preference', ''),
-        help="Enter city, state, country, or 'Remote'. This filters jobs by location."
-    )
-    
-    search_skills = st.text_input(
-        "Skills (comma separated)",
-        value=preferences.get('primary_skills', '')
-    )
-    
-    job_types = st.multiselect(
-        "Job Type",
-        options=["Full-time", "Part-time", "Contract", "Internship"],
-        default=preferences.get('job_type', ["Full-time"])
-    )
-    
-    # Initialize session state variables if they don't exist
-    if "search_id" not in st.session_state:
-        st.session_state.search_id = None
-    
-    if "job_results" not in st.session_state:
-        st.session_state.job_results = []
-    
-    if "last_poll_count" not in st.session_state:
-        st.session_state.last_poll_count = 0
-    
-    if "search_complete" not in st.session_state:
-        st.session_state.search_complete = False
-    
-    # Initialize batch counter in session state
-    if "current_batch" not in st.session_state:
-        st.session_state.current_batch = 0
-    
-    # Get user_id from session state (assuming it's stored after login)
-    user_id = st.session_state.get("user_id", None)
-    
-    # Add a note about location
-    if not search_location:
-        st.info("💡 Pro tip: Adding a location (e.g., 'New York', 'London', 'Remote') helps find jobs that match your geographic preferences.")
-    
-    # Search button
-    if st.button("Search Jobs") or (st.session_state.search_id and not st.session_state.search_complete):
-        # Start a new search if we don't have a search_id
-        if not st.session_state.search_id:
-            with st.spinner("Starting job search..."):
+            with st.spinner("Searching for matching jobs..."):
                 try:
-                    # Prepare search query
+                    # convert string to list
+                    target_roles = [role.strip() for role in target_roles.split(",")]
+                    primary_skills = [skill.strip() for skill in primary_skills.split(",")]
+
                     response = requests.post(
-                        f"{API_URL}/api/search/job-search",
+                        f"{API_URL}/api/search",
                         json={
-                            "target_roles": search_role,
-                            "primary_skills": search_skills,
-                            "location_preference": search_location,
-                            "job_type": job_types,
-                            "additional_preferences": preferences.get('additional_preferences', ''),
-                            "user_id": user_id  # Add the user ID here
+                            "target_roles": target_roles,
+                            "primary_skills": primary_skills,
+                            "preferred_location": preferred_location,
+                            "job_type": job_type[0] if job_type else "",
+                            "additional_preferences": additional_preferences
                         }
                     )
                     
                     if response.status_code == 200:
-                        search_results = response.json()
-                        st.session_state.job_results = search_results["jobs"]
-                        st.session_state.search_id = search_results["search_id"]
-                        st.session_state.search_complete = search_results.get("is_complete", False)
-                        st.session_state.last_poll_count = len(search_results["jobs"])
+                        results = response.json()
                         
-                        # Display initial results
-                        job_count = len(search_results["jobs"])
-                        st.success(f"Found {job_count} job{'s' if job_count != 1 else ''} matching your criteria!")
+                        # Display search statistics
+                        st.success(f"Found {results['filtered_jobs_count']} matching jobs out of {results['total_jobs_found']} total jobs")
                         
-                        if not st.session_state.search_complete:
-                            st.info("Searching for more jobs in the background. Stay on this page to see new results.")
+                        # Sort jobs by date_posted
+                        jobs = sorted(results['jobs'], 
+                                   key=lambda x: x['date_posted'],
+                                   reverse=True)  # Most recent first
+                        
+                        # Display each job
+                        for job in jobs:
+                            with st.expander(f"{job['title']} at {job['company']} - {job['location']}"):
+                                st.write(f"**Posted:** {job['date_posted']}")
+                                st.write(f"**Company:** {job['company']}")
+                                st.write(f"**Location:** {job['location']}")
+                                st.write(f"**Skills Matched:** {len(job['job_matched_skills'])} skills")
+                                
+                                # Display matched skills
+                                st.write("**Matched Skills:**")
+                                for skill, terms in job['job_matched_skills'].items():
+                                    st.write(f"- {skill}: {', '.join(terms)}")
+                                
+                                st.write("**Job Description:**")
+                                st.write(job['description'])
+                                
+                                # Apply button
+                                if st.button(f"Apply to {job['company']}", key=job['apply_url']):
+                                    st.markdown(f"[Apply Here]({job['apply_url']})")
                     else:
-                        st.error(f"Error searching for jobs: {response.text}")
-                        st.session_state.search_id = None  # Reset to allow new search
+                        st.error("Failed to fetch job results. Please try again.")
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")
-                    st.session_state.search_id = None  # Reset to allow new search
-        
-        # If we have a search_id and search is not complete, poll for more results
-        elif not st.session_state.search_complete:
-            try:
-                # Poll for more results
-                response = requests.get(f"{API_URL}/api/search/job-search/{st.session_state.search_id}")
-                
-                if response.status_code == 200:
-                    search_results = response.json()
-                    current_count = len(st.session_state.job_results)
-                    new_count = len(search_results["jobs"])
-                    
-                    # Check if we have new jobs
-                    if new_count > current_count:
-                        # Get the latest batch number
-                        if search_results["jobs"] and "batch" in search_results["jobs"][-1]:
-                            latest_batch = search_results["jobs"][-1]["batch"]
-                            if latest_batch > st.session_state.current_batch:
-                                st.session_state.current_batch = latest_batch
-                                st.info(f"Processing batch #{latest_batch} - found {new_count - current_count} new matching jobs")
-                        
-                        st.session_state.job_results = search_results["jobs"]
-                    
-                    # Check if search is complete
-                    st.session_state.search_complete = search_results.get("is_complete", False)
-                    
-                    if st.session_state.search_complete:
-                        st.success(f"Job search complete! Processed {st.session_state.current_batch} batches " +
-                                   f"and found {new_count} matching jobs.")
-                        
-                        # Add a button to start a new search
-                        if st.button("Start New Search"):
-                            st.session_state.search_id = None
-                            st.session_state.search_complete = False
-                            st.session_state.current_batch = 0
-                            st.rerun()
-            
-            except Exception as e:
-                st.error(f"Error polling for results: {str(e)}")
-        
-        # Set a rerun to poll again automatically if search is not complete
-        if st.session_state.search_id and not st.session_state.search_complete:
-            time.sleep(2)  # Brief delay
-            st.rerun()
-    
-    # Always display jobs if we have results
-    if st.session_state.job_results:
-        display_job_results()
-    
-    # Add button to cancel current search
-    if st.session_state.search_id and not st.session_state.search_complete:
-        if st.button("Stop Search"):
-            st.session_state.search_complete = True
-            st.success("Search stopped. Showing all jobs found so far.")
-
-def display_job_results():
-    """Display job search results in a nice format"""
-    if not st.session_state.job_results:
-        st.info("No job results to display yet.")
-        return
-    
-    jobs = st.session_state.job_results
-    
-    st.write(f"### Job Results")
-    st.write(f"Found {len(jobs)} jobs matching your skills")
-    
-    # Add sorting options
-    sort_option = st.selectbox(
-        "Sort by",
-        options=["Skills Match", "Recent First", "Company"],
-        index=0
-    )
-    
-    # Sort the jobs based on selected option
-    if sort_option == "Recent First":
-        sorted_jobs = sorted(
-            jobs, 
-            key=lambda x: x.get("date_posted", ""), 
-            reverse=True
-        )
-    elif sort_option == "Company":
-        sorted_jobs = sorted(
-            jobs,
-            key=lambda x: x.get("company", "").lower()
-        )
-    else:  # Default to Skills Match
-        sorted_jobs = sorted(
-            jobs,
-            key=lambda x: x.get("skills_matched", 0) / max(x.get("total_skills", 1), 1),
-            reverse=True
-        )
-    
-    # Add filtering options
-    filter_company = st.text_input("Filter by company name")
-    filter_location = st.text_input("Filter by location")
-    
-    # Apply filters
-    filtered_jobs = sorted_jobs
-    if filter_company:
-        filtered_jobs = [
-            job for job in filtered_jobs 
-            if filter_company.lower() in job.get("company", "").lower()
-        ]
-    
-    if filter_location:
-        filtered_jobs = [
-            job for job in filtered_jobs 
-            if filter_location.lower() in job.get("location", "").lower()
-        ]
-    
-    # Display count of filtered jobs
-    if filter_company or filter_location:
-        st.write(f"Showing {len(filtered_jobs)} jobs after filtering")
-    
-    # Display each job in a card-like format
-    for i, job in enumerate(filtered_jobs):
-        with st.container():
-            # Job header
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.markdown(f"#### {i+1}. {job.get('title', 'Unknown Position')}")
-                st.markdown(f"**{job.get('company', 'Unknown Company')}** • {job.get('location', 'Unknown')}")
-            
-            with col2:
-                # Show skill match ratio
-                skills_matched = job.get("skills_matched", 0)
-                total_skills = job.get("total_skills", 1)
-                match_percentage = int((skills_matched / total_skills) * 100)
-                st.markdown(f"**Skills Match: {match_percentage}%**")
-                st.markdown(f"**{job.get('job_type', '')}**")
-            
-            # Job details in expander
-            with st.expander("View Details"):
-                st.markdown(f"**Posted:** {job.get('date_posted', 'Unknown')}")
-                
-                if job.get('salary'):
-                    st.markdown(f"**Salary:** {job.get('salary')}")
-                
-                st.markdown("**Description:**")
-                st.markdown(job.get('description', 'No description available'))
-                
-                if job.get('url'):
-                    st.markdown(f"[Apply for this job]({job.get('url')})")
-            
-            # Visual separator between jobs
-            st.markdown("---")
+        else:
+            st.error("Please enter at least one target role and primary skill.")

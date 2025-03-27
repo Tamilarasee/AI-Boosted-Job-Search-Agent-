@@ -6,25 +6,13 @@ from typing import List, Dict, Any, Optional, Tuple
 from pydantic import BaseModel
 import httpx
 import asyncio
-from supabase import create_client
+from utils.supabase.db import supabase
 from dotenv import load_dotenv
+import json
+import time
 
 # Load environment variables
 load_dotenv()
-
-# Get SerpAPI key from environment
-SERPAPI_KEY = os.getenv("SERPAPI_KEY")
-if not SERPAPI_KEY:
-    raise ValueError("SERPAPI_KEY environment variable not set")
-
-# Supabase configuration
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Supabase credentials not set")
-
-# Initialize Supabase client
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 router = APIRouter()
 
@@ -34,7 +22,8 @@ class JobSearchQuery(BaseModel):
     location_preference: Optional[str] = None
     job_type: Optional[List[str]] = None
     additional_preferences: Optional[str] = None
-    user_id: Optional[str] = None  # User ID for associating jobs with a user
+    user_id: Optional[str] = None
+    date_posted: Optional[str] = "7 Days" 
 
 class JobSearchResponse(BaseModel):
     jobs: List[Dict[str, Any]]
@@ -140,151 +129,51 @@ async def save_job_to_db(job_data: Dict[str, Any], search_id: str) -> bool:
         return False
 
 async def background_job_fetching(search_id: str, query: JobSearchQuery):
-    """Background task to fetch more jobs after initial results are returned"""
+    """Background task to fetch jobs using OpenAI"""
     try:
-        print(f"Starting background job fetching for search_id: {search_id}")
+        print(f"Starting OpenAI job search for search_id: {search_id}")
         search_status_cache[search_id] = "in_progress"
-        page_number = 1  # Track which page we're processing
         
         # Break down the primary skills into a list
         primary_skills = [skill.strip() for skill in query.primary_skills.split(',')]
         
-        # Base search parameters
-        base_params = {
-            "api_key": SERPAPI_KEY,
-            "engine": "google_jobs",
-            "q": f"{query.target_roles} jobs",
-            "hl": "en",
-            "chips": "date_posted:week",  # Last 7 days
-            "sort_by": "date"  # Sort by date (most recent first)
-        }
+        # Search for jobs using OpenAI
+        job_listings = await execute_openai_search(query)
+        print(f"Found {len(job_listings)} jobs using OpenAI search")
         
-        # Add location if specified - make sure it's included
-        if query.location_preference:
-            base_params["location"] = query.location_preference
-            print(f"Including location in background search: {query.location_preference}")
-        
-        # Store all qualified jobs
+        # Process and filter the job listings
         all_filtered_jobs = []
-        seen_jobs = set()
+        for job in job_listings:
+            # Get job description
+            description = job.get("description", "").lower()
+            
+            # Check if job has at least 2 of the required skills
+            matched_skills = skills_match_count(description, primary_skills)
+            
+            if matched_skills >= 2 or len(primary_skills) <= 1:
+                # Format job details
+                job_details = {
+                    "title": job.get("title", "Unknown Position"),
+                    "company": job.get("company", "Unknown Company"),
+                    "location": job.get("location", "Unknown Location"),
+                    "description": job.get("description", ""),
+                    "url": job.get("url", ""),
+                    "date_posted": job.get("date_posted", "Recent"),
+                    "salary": job.get("salary", "Not specified"),
+                    "job_type": job.get("job_type", ""),
+                    "experience_level": job.get("experience_level", "Not specified"),
+                    "source": "AI Job Search",
+                    "skills_matched": matched_skills,
+                    "total_skills": len(primary_skills)
+                }
+                
+                # Save job to database
+                saved = await save_job_to_db(job_details, search_id)
+                if saved:
+                    all_filtered_jobs.append(job_details)
         
-        # Get the next page token from initial search
-        next_page_token = job_results_cache.get(f"{search_id}_next_token")
-        
-        # Fetch subsequent pages (page 1 was already fetched in the initial request)
-        page_number = 2
-        
-        # Continue until we hit our page limit or job limit
-        while (page_number <= MAX_PAGES_TO_FETCH and 
-               next_page_token and 
-               len(all_filtered_jobs) < MAX_JOBS_TO_STORE):
-            try:
-                # Update params with the next page token
-                params = base_params.copy()
-                params["next_page_token"] = next_page_token
-                
-                # Log page processing
-                print(f"Processing page #{page_number} with next_page_token")
-                
-                # Fetch jobs for this page
-                jobs_batch, next_page_token = await fetch_jobs_with_serpapi(params)
-                print(f"Page #{page_number}: Found {len(jobs_batch)} jobs from API")
-                
-                # If no jobs, we've reached the end
-                if not jobs_batch:
-                    print(f"No more jobs found on page #{page_number}")
-                    break
-                
-                # Track filtered jobs for this page
-                page_filtered_jobs = 0
-                
-                # Process each job
-                for job in jobs_batch:
-                    # Stop if we've hit our job limit
-                    if len(all_filtered_jobs) >= MAX_JOBS_TO_STORE:
-                        print(f"Reached maximum job limit of {MAX_JOBS_TO_STORE}")
-                        break
-                
-                    # Create a unique identifier
-                    job_url = job.get("apply_link", {}).get("link", "") or job.get("apply_options", [{}])[0].get("link", "")
-                    job_identifier = f"{job.get('title', '')}-{job.get('company_name', '')}-{job_url}"
-                    
-                    # Skip if we've seen this job before
-                    if job_identifier in seen_jobs:
-                        continue
-                    
-                    seen_jobs.add(job_identifier)
-                    
-                    # Get job description
-                    description = job.get("description", "").lower()
-                    
-                    # Check if job has at least 2 of the required skills
-                    matched_skills = skills_match_count(description, primary_skills)
-                    
-                    if matched_skills >= 2 or len(primary_skills) <= 1:
-                        # Format job details
-                        job_details = {
-                            "title": job.get("title", "Unknown Position"),
-                            "company": job.get("company_name", "Unknown Company"),
-                            "location": job.get("location", "Unknown Location"),
-                            "description": job.get("description", ""),
-                            "url": job_url,
-                            "date_posted": job.get("detected_extensions", {}).get("posted_at", ""),
-                            "salary": job.get("detected_extensions", {}).get("salary", "Not specified"),
-                            "job_type": job.get("detected_extensions", {}).get("job_type", ""),
-                            "source": "Google Jobs",
-                            "skills_matched": matched_skills,
-                            "total_skills": len(primary_skills),
-                            "page": page_number  # Track which page this job came from
-                        }
-                        
-                        # Save job to database
-                        saved = await save_job_to_db(job_details, search_id)
-                        if saved:
-                            page_filtered_jobs += 1
-                        
-                        all_filtered_jobs.append(job_details)
-                
-                # Log page results
-                print(f"Page #{page_number}: Filtered down to {page_filtered_jobs} matching jobs")
-                print(f"Total jobs so far: {len(all_filtered_jobs)}")
-                
-                # Update the cache after each successful page
-                job_results_cache[search_id] = all_filtered_jobs
-                
-                # Store the next page token for resuming if needed
-                if next_page_token:
-                    job_results_cache[f"{search_id}_next_token"] = next_page_token
-                
-                # If no next page token, we're done
-                if not next_page_token:
-                    print(f"No next page token after page #{page_number}")
-                    break
-                
-                # Check if we've reached our job limit
-                if len(all_filtered_jobs) >= MAX_JOBS_TO_STORE:
-                    print(f"Reached maximum job limit of {MAX_JOBS_TO_STORE}")
-                    break
-                
-                # Increment page number
-                page_number += 1
-                
-                # Add a small delay between pages to avoid rate limiting
-                await asyncio.sleep(2)
-                
-            except Exception as e:
-                print(f"Error processing page #{page_number}: {str(e)}")
-                break
-        
-        # Log the reason we stopped
-        if page_number > MAX_PAGES_TO_FETCH:
-            print(f"Stopped after reaching maximum page limit ({MAX_PAGES_TO_FETCH})")
-        elif len(all_filtered_jobs) >= MAX_JOBS_TO_STORE:
-            print(f"Stopped after reaching maximum job limit ({MAX_JOBS_TO_STORE})")
-        elif not next_page_token:
-            print("Stopped because there are no more pages available")
-        else:
-            print("Stopped due to an error or other condition")
+        # Update the cache
+        job_results_cache[search_id] = all_filtered_jobs
         
         # Mark search as complete
         search_status_cache[search_id] = "complete"
@@ -294,17 +183,15 @@ async def background_job_fetching(search_id: str, query: JobSearchQuery):
             try:
                 supabase.table("job_searches").update({
                     "is_complete": True,
-                    "total_jobs_found": len(all_filtered_jobs),
-                    "total_pages": page_number - 1,
-                    "stop_reason": get_stop_reason(page_number, len(all_filtered_jobs), next_page_token)
+                    "total_jobs_found": len(all_filtered_jobs)
                 }).eq("id", search_id).execute()
             except Exception as e:
                 print(f"Error updating search status: {str(e)}")
         
-        print(f"Job search complete for {search_id}. Processed {page_number-1} pages. Total filtered jobs: {len(all_filtered_jobs)}")
+        print(f"Job search complete for {search_id}. Total filtered jobs: {len(all_filtered_jobs)}")
         
     except Exception as e:
-        print(f"Error in background job fetching: {str(e)}")
+        print(f"Error in background job fetching with OpenAI: {str(e)}")
         search_status_cache[search_id] = "error"
 
 def get_stop_reason(page_number, job_count, next_page_token):
@@ -321,17 +208,22 @@ def get_stop_reason(page_number, job_count, next_page_token):
 @router.post("/job-search", response_model=JobSearchResponse)
 async def search_jobs(query: JobSearchQuery, background_tasks: BackgroundTasks):
     """
-    Search for jobs using Google Jobs via SerpAPI
-    Returns initial results quickly and continues fetching more in background
+    Search for jobs using OpenAI's web browsing capability
+    Returns initial results and continues searching in background
     """
     # Generate a unique search ID
     search_id = str(uuid.uuid4())
     
-    # Construct search query
-    search_query = f"{query.target_roles} jobs"
+    # Construct search query for display
+    location_str = f" in {query.location_preference}" if query.location_preference else ""
+    job_type_str = ""
+    if query.job_type and len(query.job_type) > 0:
+        job_type_str = f" ({', '.join(query.job_type)})"
     
-    # Split primary skills into a list
-    primary_skills = [skill.strip() for skill in query.primary_skills.split(',')]
+    experience_str = f" {query.experience_level}" if query.experience_level and query.experience_level != "Any Level" else ""
+    date_str = f" posted within {query.date_posted}" if query.date_posted else " posted recently"
+    
+    search_query = f"{experience_str} {query.target_roles} jobs{job_type_str}{location_str}{date_str}"
     
     try:
         # Create a record for this search
@@ -344,6 +236,8 @@ async def search_jobs(query: JobSearchQuery, background_tasks: BackgroundTasks):
                 "primary_skills": query.primary_skills,
                 "location": query.location_preference or "",
                 "job_types": query.job_type or [],
+                "experience_level": query.experience_level or "Any Level",
+                "date_posted": query.date_posted or "7 Days",
                 "is_complete": False
             }
             
@@ -367,49 +261,14 @@ async def search_jobs(query: JobSearchQuery, background_tasks: BackgroundTasks):
             initial_params["location"] = query.location_preference
             print(f"Including location in search: {query.location_preference}")
         
-        # Get initial results and next page token
-        initial_results, next_page_token = await fetch_jobs_with_serpapi(initial_params)
-        
-        # Store next page token for background processing
-        if next_page_token:
-            job_results_cache[f"{search_id}_next_token"] = next_page_token
-        
-        # Filter and format initial results
+        # Get initial results (empty at first since we'll search in background)
         formatted_jobs = []
-        for job in initial_results:
-            # Get job description
-            description = job.get("description", "").lower()
-            
-            # Check if job has at least 2 of the required skills
-            matched_skills = skills_match_count(description, primary_skills)
-            
-            if matched_skills >= 2 or len(primary_skills) <= 1:
-                job_url = job.get("apply_link", {}).get("link", "") or job.get("apply_options", [{}])[0].get("link", "")
-                job_details = {
-                    "title": job.get("title", "Unknown Position"),
-                    "company": job.get("company_name", "Unknown Company"),
-                    "location": job.get("location", "Unknown Location"),
-                    "description": job.get("description", ""),
-                    "url": job_url,
-                    "date_posted": job.get("detected_extensions", {}).get("posted_at", ""),
-                    "salary": job.get("detected_extensions", {}).get("salary", "Not specified"),
-                    "job_type": job.get("detected_extensions", {}).get("job_type", ""),
-                    "source": "Google Jobs",
-                    "skills_matched": matched_skills,
-                    "total_skills": len(primary_skills),
-                    "page": 1  # First page
-                }
-                
-                # Save job to database
-                await save_job_to_db(job_details, search_id)
-                
-                formatted_jobs.append(job_details)
         
         # Store initial results in cache
         job_results_cache[search_id] = formatted_jobs
         search_status_cache[search_id] = "starting"
         
-        # Start background task to fetch more results
+        # Start background task to fetch jobs with OpenAI
         background_tasks.add_task(background_job_fetching, search_id, query)
         
         return {
@@ -417,8 +276,7 @@ async def search_jobs(query: JobSearchQuery, background_tasks: BackgroundTasks):
             "search_query": search_query,
             "total_jobs": len(formatted_jobs),
             "search_id": search_id,
-            "is_complete": False,
-            "has_more_pages": next_page_token is not None
+            "is_complete": False
         }
             
     except Exception as e:
@@ -430,6 +288,10 @@ async def get_job_results(search_id: str):
     Get job search results for a specific search ID
     Allows polling for more results after initial search
     """
+    # Debug print
+    print(f"Received request for search_id: {search_id}")
+    print(f"Available search IDs in cache: {list(job_results_cache.keys())}")
+    
     if search_id not in job_results_cache:
         # Try to fetch from database if not in memory
         try:
@@ -439,7 +301,7 @@ async def get_job_results(search_id: str):
                 search_result = supabase.table("job_searches").select("*").eq("id", search_id).execute()
                 is_complete = search_result.data[0]["is_complete"] if search_result.data else False
                 
-                # Format the results to match our schema
+                # Format the results
                 formatted_jobs = []
                 for job in jobs:
                     formatted_jobs.append({
@@ -451,7 +313,7 @@ async def get_job_results(search_id: str):
                         "date_posted": job.get("date_posted", ""),
                         "salary": job.get("salary", "Not specified"),
                         "job_type": job.get("job_type", ""),
-                        "source": job.get("source", "Google Jobs"),
+                        "source": job.get("source", "AI Job Search"),
                         "skills_matched": job.get("skills_matched", 0),
                         "total_skills": job.get("total_skills", 0)
                     })
@@ -464,9 +326,25 @@ async def get_job_results(search_id: str):
                     "is_complete": is_complete
                 }
             
+            # If we got here, the search isn't in the database either
+            print(f"Search ID {search_id} not found in database")
+            
+            # Check if this is a search that was recently started but hasn't saved results yet
+            if search_id in search_status_cache and search_status_cache[search_id] == "starting":
+                # Return an empty result but indicate search is still running
+                return {
+                    "jobs": [],
+                    "search_query": "Jobs matching your skills",
+                    "total_jobs": 0,
+                    "search_id": search_id,
+                    "is_complete": False
+                }
+            
+            # Otherwise, truly not found
             raise HTTPException(status_code=404, detail="Search results not found")
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error fetching search results: {str(e)}")
+            print(f"Error fetching from database: {str(e)}")
+            raise HTTPException(status_code=404, detail=f"Error fetching search results: {str(e)}")
     
     jobs = job_results_cache[search_id]
     status = search_status_cache.get(search_id, "unknown")
@@ -495,3 +373,298 @@ async def get_user_job_searches(user_id: str):
         return searches.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching user job searches: {str(e)}")
+
+async def execute_openai_search(query: JobSearchQuery) -> List[Dict[str, Any]]:
+    """Execute an OpenAI search with the user's filters"""
+    try:
+        # Process date filter
+        date_filter = "7 days"  # Default
+        if query.date_posted:
+            if query.date_posted == "Today":
+                date_filter = "today"
+            else:
+                # Extract number from strings like "3 Days"
+                days_match = re.search(r'(\d+)', query.date_posted)
+                if days_match:
+                    date_filter = f"the last {days_match.group(1)} days"
+        
+        # Process experience level filter
+        experience_filter = ""
+        if query.experience_level and query.experience_level != "Any Level":
+            experience_filter = f"for {query.experience_level} positions"
+        
+        # Process job type
+        job_type_filter = ""
+        if query.job_type and len(query.job_type) > 0:
+            job_type_filter = f"that are {', '.join(query.job_type)}"
+        
+        # Make the search query more specific and direct
+        search_instructions = (
+            f"Find job listings for {query.target_roles} positions "
+            f"{experience_filter} {job_type_filter} posted within {date_filter}"
+        )
+        
+        if query.location_preference:
+            search_instructions += f" in {query.location_preference}"
+        
+        # Create more explicit system instructions
+        system_instructions = f"""
+        You are a job search assistant. Your ONLY task is to find REAL job postings matching these criteria:
+        
+        SEARCH CRITERIA:
+        - Role/Title: {query.target_roles}
+        - Skills needed: {query.primary_skills}
+        - Location: {query.location_preference or "Any"}
+        - Posted within: {date_filter}
+        - Experience level: {query.experience_level or "Any level"}
+        - Job type: {', '.join(query.job_type) if query.job_type else "Any"}
+        
+        INSTRUCTIONS:
+        1. Search ONLY job posting websites like LinkedIn Jobs, Indeed, Glassdoor, ZipRecruiter, and company career pages
+        2. Find AT LEAST 10 job listings that match the criteria
+        3. For each job, extract: Title, Company, Location, URL, Description, Date Posted, Salary, Job Type
+        4. ONLY return actual job listings with application links - no articles, blogs, or other content
+        5. If you can't find enough matches for ALL criteria, relax the criteria but prioritize role and skills matches
+        
+        FORMAT: Return results as a JSON array with these fields for each job:
+        - title: The job title
+        - company: The company name
+        - location: Where the job is located
+        - url: Direct link to apply
+        - description: Brief job description
+        - date_posted: When the job was posted
+        - salary: Salary information if available
+        - job_type: Full-time, part-time, etc.
+        
+        Your entire response should be ONLY the JSON array of job listings.
+        """
+        
+        # Create an assistant with web browsing capability
+        assistant = client.beta.assistants.create(
+            name="Job Search Assistant",
+            instructions=system_instructions,
+            model="gpt-4o",
+            tools=[{"type": "web_browser"}]
+        )
+        
+        # Create a thread
+        thread = client.beta.threads.create()
+        
+        # Add a message to the thread
+        message = client.beta.threads.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=f"{search_instructions}\n\nFind at least 10 job listings matching these criteria and return them as JSON."
+        )
+        
+        # Run the assistant with a longer timeout
+        run = client.beta.threads.runs.create(
+            thread_id=thread.id,
+            assistant_id=assistant.id
+        )
+        
+        # Wait for the run to complete (with a longer timeout)
+        max_wait_time = 120  # 2 minutes
+        start_time = time.time()
+        
+        print(f"Waiting for OpenAI search to complete...")
+        
+        while run.status in ["queued", "in_progress"]:
+            if time.time() - start_time > max_wait_time:
+                print(f"OpenAI search timed out after {max_wait_time} seconds")
+                break
+                
+            await asyncio.sleep(5)  # Check every 5 seconds
+            run = client.beta.threads.runs.retrieve(
+                thread_id=thread.id,
+                run_id=run.id
+            )
+            print(f"OpenAI search status: {run.status}, elapsed time: {time.time() - start_time:.1f}s")
+        
+        # Check if the run completed successfully
+        if run.status != "completed":
+            print(f"OpenAI search failed with status: {run.status}")
+            
+            # Fall back to a simpler search if the main one fails
+            return await fallback_search(query)
+        
+        # Get the messages from the thread
+        messages = client.beta.threads.messages.list(
+            thread_id=thread.id
+        )
+        
+        # Extract job listings from the assistant's response
+        job_listings = []
+        for message in messages.data:
+            if message.role == "assistant":
+                for content in message.content:
+                    if content.type == "text":
+                        text = content.text.value
+                        print(f"Raw OpenAI response: {text[:200]}...")  # Print first 200 chars
+                        
+                        try:
+                            # Look for JSON array in the text
+                            json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+                            if json_match:
+                                json_str = json_match.group(0)
+                                jobs_data = json.loads(json_str)
+                                for job in jobs_data:
+                                    if validate_job_posting(job):
+                                        job_listings.append(job)
+                            else:
+                                # Try parsing the entire text as JSON
+                                try:
+                                    jobs_data = json.loads(text)
+                                    if isinstance(jobs_data, list):
+                                        for job in jobs_data:
+                                            if validate_job_posting(job):
+                                                job_listings.append(job)
+                                except:
+                                    print("Failed to parse entire text as JSON")
+                        except Exception as e:
+                            print(f"Error parsing OpenAI response: {str(e)}")
+        
+        print(f"Found {len(job_listings)} valid job listings from OpenAI search")
+        
+        # If no jobs found, try the fallback search
+        if not job_listings:
+            print("No jobs found from primary search, trying fallback...")
+            return await fallback_search(query)
+            
+        # Clean up - delete the assistant
+        client.beta.assistants.delete(assistant.id)
+        
+        return job_listings
+    
+    except Exception as e:
+        print(f"Error in execute_openai_search: {str(e)}")
+        # Try fallback search if main search fails
+        return await fallback_search(query)
+
+async def fallback_search(query: JobSearchQuery) -> List[Dict[str, Any]]:
+    """Fallback search method that uses a more relaxed approach"""
+    try:
+        print("Executing fallback search...")
+        
+        # Create a simpler, more direct prompt
+        system_message = f"""
+        Find job listings for {query.target_roles}. Focus ONLY on actual job postings.
+        I'm looking for positions that require these skills: {query.primary_skills}.
+        Return results in JSON format with these fields:
+        title, company, location, url, description, date_posted, salary, job_type
+        """
+        
+        # Use the ChatCompletion API directly for a simpler approach
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a job search assistant that finds real job postings."},
+                {"role": "user", "content": system_message}
+            ],
+            tools=[{"type": "web_browsing"}],
+            tool_choice={"type": "web_browsing"},
+            temperature=0.5,
+            max_tokens=4000
+        )
+        
+        # Extract the text
+        text = response.choices[0].message.content
+        print(f"Fallback search response: {text[:200]}...")  # Print first 200 chars
+        
+        # Parse the JSON from the response
+        job_listings = []
+        try:
+            # Look for JSON in the text
+            json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                jobs_data = json.loads(json_str)
+                for job in jobs_data:
+                    job_listings.append(job)
+            else:
+                # Try parsing the entire text
+                try:
+                    jobs_data = json.loads(text)
+                    if isinstance(jobs_data, list):
+                        job_listings.extend(jobs_data)
+                except:
+                    print("Failed to parse fallback response as JSON")
+        except Exception as e:
+            print(f"Error parsing fallback response: {str(e)}")
+        
+        print(f"Found {len(job_listings)} job listings from fallback search")
+        return job_listings
+        
+    except Exception as e:
+        print(f"Fallback search failed: {str(e)}")
+        # Return empty list if even the fallback fails
+        return []
+
+def validate_job_posting(job):
+    """Verify if the result is a real job posting"""
+    required_fields = ["title", "company", "url"]
+    if not all(field in job and job[field] for field in required_fields):
+        return False
+        
+    # Check URL pattern - most job URLs follow specific patterns
+    job_url_patterns = [
+        "/job/", "/jobs/", "/career", "/apply", "careers.",
+        "jobs.", "glassdoor", "linkedin.com/jobs", "indeed"
+    ]
+    
+    if not any(pattern in job["url"].lower() for pattern in job_url_patterns):
+        # If URL doesn't look like a job posting URL, check if it's a company site
+        company_patterns = [".com", ".org", ".io", ".net", ".co"]
+        if not any(pattern in job["url"].lower() for pattern in company_patterns):
+            return False
+    
+    return True
+
+async def search_jobs_with_openai_chunked(query: JobSearchQuery) -> List[Dict[str, Any]]:
+    """Use multiple OpenAI searches to get more comprehensive results"""
+    all_jobs = []
+    seen_urls = set()
+    
+    # Create different search chunks
+    search_variations = [
+        f"{query.target_roles} jobs in {query.location_preference or 'remote'} posted this week",
+        f"entry level {query.target_roles} jobs in {query.location_preference or 'USA'} recent postings",
+        f"experienced {query.target_roles} jobs {query.location_preference or ''} last 7 days",
+        f"{query.target_roles} {query.primary_skills} jobs {query.location_preference or ''}"
+    ]
+    
+    # Add job type variations
+    if query.job_type:
+        for job_type in query.job_type:
+            search_variations.append(
+                f"{job_type} {query.target_roles} jobs in {query.location_preference or 'USA'}"
+            )
+    
+    # Process each search variation
+    for search_query in search_variations:
+        # Execute the search with specific instructions to find different results
+        results = await execute_openai_search(
+            search_query=search_query,
+            skills=query.primary_skills,
+            # Ask for results that haven't been seen in previous searches
+            additional_instructions=f"Find different job postings than these URLs: {', '.join(list(seen_urls)[:5])}" 
+            if seen_urls else ""
+        )
+        
+        # Deduplicate by URL
+        for job in results:
+            if job["url"] not in seen_urls and validate_job_posting(job):
+                seen_urls.add(job["url"])
+                all_jobs.append(job)
+                
+        print(f"Found {len(results)} jobs for query '{search_query}', total unique jobs: {len(all_jobs)}")
+        
+        # If we have enough jobs, we can stop
+        if len(all_jobs) >= 100:
+            break
+            
+        # Sleep between requests to avoid rate limits
+        await asyncio.sleep(1)
+    
+    return all_jobs[:100]  # Limit to 100 jobs maximum

@@ -14,8 +14,7 @@ def main():
         "login": login_form,
         "register": registration_form,
         "user_details": user_details_form,
-        "job_preferences": job_preferences_form,
-        "job_search": job_search_form
+        "job_preferences": job_preferences_form
     }
 
     # Display the current page

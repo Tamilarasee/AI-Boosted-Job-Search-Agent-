@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile,Form
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from utils.supabase.db import supabase
-import requests
+import traceback
 from api.resume_extraction import extract_pdf_text
-from api.search_jobs import router as search_router
+from api.search import router as search_router
 from io import BytesIO
 
 
@@ -17,14 +17,11 @@ class UserLogin(BaseModel):
     email: str 
     password: str
 
-class UserDetails(BaseModel):
-    name: str = Form(...)
-    resume_files: List[UploadFile] = File(...)
-
 class JobSearch(BaseModel):
     title: str
     location: str
     description: Optional[str] = None
+
 
 
 @app.post("/auth/login")
@@ -55,43 +52,51 @@ async def register(user: UserLogin):
 
 @app.post("/users/details")
 async def create_user_details(
-    name: str = Form(...),
-    resumes: List[UploadFile] = File(...),
-    token: str = Form(None)  # Optional auth token
+    name: str = Form(...), # required field(...),
+    resumes: List[UploadFile] = File(...)
 ):
     try:
         # Process PDFs as before
         resume_data = []
         for resume in resumes:
-            await resume.seek(0)
-            content = await resume.read()
-            pdf_file = BytesIO(content)
-            text = extract_pdf_text(pdf_file)
-            resume_data.append(text)
+            if resume.filename.endswith('.pdf'):
+                content = await resume.read() # raw bytes (binary data)
+
+
+    # Create a BytesIO object (in-memory file) from the content
+    # This gives us a file-like object we can work with-as needed by pyPDf for processing
+                pdf_file = BytesIO(content)
+                text = extract_pdf_text(pdf_file)
+                resume_data.append(text)
 
         user_data = {
             "name": name,
-            "resumes": resume_data
+            "resumes": resume_data,
+            "user_id": supabase.auth.get_user().user.id
         }
 
-        # Use authenticated client if token is provided
-        if token:
-            # Create a new Supabase client with the user's token
-            from utils.supabase.db import create_client, url
-            auth_client = create_client(url, token)
-            response = auth_client.table("users").insert(user_data).execute()
-        else:
-            # For development/testing, you could disable RLS in Supabase
-            response = supabase.table("users").insert(user_data).execute()
+        response = supabase.table("users").insert(user_data).execute()
 
         if response.data:
             return {"success": True, "data": response.data[0]}
         raise HTTPException(status_code=400, detail="Failed to save user details")
+   
     except Exception as e:
-        import traceback
+        
         error_details = traceback.format_exc()
         print(f"Error: {str(e)}\n{error_details}")
         raise HTTPException(status_code=500, detail=f"Error processing resumes: {str(e)}")
     
+# @app.post("/search/jobs")
+# async def search_jobs(preferences: JobPreferences):
+#     try:
+#         # Just log and return for now
+#         print(f"Received job preferences: {preferences}")
+        
+#         # We'll implement the actual search later
+#         return {"status": "received", "preferences": preferences.model_dump()}
+#     except Exception as e:
+#         print(f"Error in job search: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to process job search")
 
-app.include_router(search_router, prefix="/api/search", tags=["search"])
+app.include_router(search_router, prefix="/api")

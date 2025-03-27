@@ -1,22 +1,13 @@
 from openai import OpenAI
-client = OpenAI()
 
-completion = client.chat.completions.create(
-    model="gpt-4o-search-preview",
-    web_search_options={
-        "user_location": {
-            "type": "approximate",
-            "approximate": {
-                "country": "US",
-            }
-        },
-    },
-    messages=[{
-        "role": "user",
-        "content": """
-What is the best Job API avaialble for use today - it should include jobs from indeed and linkedin - with most uptodate data
-"""
-  }],
+client = OpenAI()
+# import openai
+# print(openai.__version__)
+
+response = client.responses.create(
+    model="gpt-4o",
+    tools=[{ "type": "web_search_preview" }],
+    input="100 Machine learning engineer jobs in USA posted in the last 7 days",
 )
 
-print(completion.choices[0].message.content)
+print(response)
