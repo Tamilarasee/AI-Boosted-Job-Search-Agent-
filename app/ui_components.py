@@ -31,8 +31,7 @@ def login_form():
 
     if st.button("Sign Up"):
         st.session_state.current_page = "register"
-        
-        
+
 # Function for the registration form
 def registration_form():
     st.subheader("Create a New Account")
@@ -135,7 +134,7 @@ def job_preferences_form():
     job_type = st.multiselect(
         "Job Type", 
         options=["Full-time", "Part-time", "Contract", "Internship"],
-        
+        default=["Full-time"]  # Set default value
     )
     
     additional_preferences = st.text_area(
@@ -143,58 +142,93 @@ def job_preferences_form():
         help="Any other requirements or preferences"
     )
 
+    # Test endpoint button for debugging
+    if st.button("Test API Connection"):
+        try:
+            response = requests.get(f"{API_URL}/api/test")
+            if response.status_code == 200:
+                st.success(f"API connection successful: {response.json()}")
+            else:
+                st.error(f"API connection failed: {response.status_code}")
+        except Exception as e:
+            st.error(f"API connection error: {str(e)}")
+
     # Submit button
     if st.button("Search Jobs"):
         if target_roles and primary_skills:
             with st.spinner("Searching for matching jobs..."):
                 try:
                     # convert string to list
-                    target_roles = [role.strip() for role in target_roles.split(",")]
-                    primary_skills = [skill.strip() for skill in primary_skills.split(",")]
-
+                    target_roles_list = [role.strip() for role in target_roles.split(",")]
+                    primary_skills_list = [skill.strip() for skill in primary_skills.split(",")]
+                    
+                    # Print debug info
+                    st.write(f"Debug - Sending job_type: {job_type[0] if job_type else 'Full-time'}")
+                    
+                    # Create the request payload
+                    payload = {
+                        "target_roles": target_roles_list,
+                        "primary_skills": primary_skills_list,
+                        "preferred_location": preferred_location,
+                        "job_type": job_type[0] if job_type else "Full-time",
+                        "additional_preferences": additional_preferences
+                    }
+                    
+                    # Display the full request for debugging
+                    st.json(payload)
+                    
                     response = requests.post(
                         f"{API_URL}/api/search",
-                        json={
-                            "target_roles": target_roles,
-                            "primary_skills": primary_skills,
-                            "preferred_location": preferred_location,
-                            "job_type": job_type[0] if job_type else "",
-                            "additional_preferences": additional_preferences
-                        }
+                        json=payload
                     )
+                    
+                    # Display raw response for debugging
+                    st.write(f"Response status: {response.status_code}")
                     
                     if response.status_code == 200:
                         results = response.json()
                         
                         # Display search statistics
-                        st.success(f"Found {results['filtered_jobs_count']} matching jobs out of {results['total_jobs_found']} total jobs")
+                        st.success(f"Found {results.get('filtered_jobs_count', 0)} matching jobs out of {results.get('total_jobs_found', 0)} total jobs")
                         
-                        # Sort jobs by date_posted
-                        jobs = sorted(results['jobs'], 
-                                   key=lambda x: x['date_posted'],
-                                   reverse=True)  # Most recent first
+                        # Get jobs or empty list if not present
+                        jobs = results.get('jobs', [])
+                        
+                        # Sort jobs by date_posted if available
+                        if jobs:
+                            jobs = sorted(jobs, 
+                                       key=lambda x: x.get('date_posted', ''),
+                                       reverse=True)  # Most recent first
                         
                         # Display each job
                         for job in jobs:
-                            with st.expander(f"{job['title']} at {job['company']} - {job['location']}"):
-                                st.write(f"**Posted:** {job['date_posted']}")
-                                st.write(f"**Company:** {job['company']}")
-                                st.write(f"**Location:** {job['location']}")
-                                st.write(f"**Skills Matched:** {len(job['job_matched_skills'])} skills")
+                            with st.expander(f"{job.get('title', 'No title')} at {job.get('company', 'Unknown')} - {job.get('location', 'No location')}"):
+                                st.write(f"**Posted:** {job.get('date_posted', 'Unknown')}")
+                                st.write(f"**Company:** {job.get('company', 'Unknown')}")
+                                st.write(f"**Location:** {job.get('location', 'Unknown')}")
+                                st.write(f"**Apply:** {job.get('url', 'Unknown')}")
                                 
-                                # Display matched skills
-                                st.write("**Matched Skills:**")
-                                for skill, terms in job['job_matched_skills'].items():
-                                    st.write(f"- {skill}: {', '.join(terms)}")
+                                # Display matched skills if available
+                                if 'job_matched_skills' in job:
+                                    st.write(f"**Skills Matched:** {len(job['job_matched_skills'])} skills")
+                                    
+                                    # Display matched skills
+                                    st.write("**Matched Skills:**")
+                                    for skill, terms in job['job_matched_skills'].items():
+                                        st.write(f"- {skill}: {', '.join(terms)}")
                                 
                                 st.write("**Job Description:**")
-                                st.write(job['description'])
+                                st.write(job.get('description', 'No description available'))
                                 
                                 # Apply button
-                                if st.button(f"Apply to {job['company']}", key=job['apply_url']):
-                                    st.markdown(f"[Apply Here]({job['apply_url']})")
+                                if st.button(f"Apply to {job.get('company', 'this job')}", key=job.get('apply_url', '')):
+                                    st.markdown(f"[Apply Here]({job.get('url', '#')})")
                     else:
-                        st.error("Failed to fetch job results. Please try again.")
+                        st.error(f"Failed to fetch job results. Status code: {response.status_code}")
+                        try:
+                            st.error(f"Error details: {response.json()}")
+                        except:
+                            st.error(f"Raw response: {response.text}")
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")
         else:

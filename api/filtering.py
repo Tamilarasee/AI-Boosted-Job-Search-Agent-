@@ -18,7 +18,7 @@ def expand_skills(skills):
     """
     
     skill_response = client.responses.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         input=skill_prompt        
     )
     
@@ -34,7 +34,7 @@ def expand_skills(skills):
         
     # Get text content from the message
     text_content = message_output.content[0].text
-    
+    print(f"\n\nTEXT CONTENT expanded skills: {text_content}\n\n")
     # Clean up JSON
     import re
     json_text = text_content

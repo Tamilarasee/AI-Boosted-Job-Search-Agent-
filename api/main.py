@@ -4,8 +4,9 @@ from typing import Optional, List
 from utils.supabase.db import supabase
 import traceback
 from api.resume_extraction import extract_pdf_text
-from api.search import router as search_router
+from api.search_rapidapi import router as search_router
 from io import BytesIO
+#from api.search_google_api import router as google_search_router
 
 
 app = FastAPI()
@@ -100,3 +101,4 @@ async def create_user_details(
 #         raise HTTPException(status_code=500, detail="Failed to process job search")
 
 app.include_router(search_router, prefix="/api")
+#app.include_router(google_search_router, prefix="/api")
