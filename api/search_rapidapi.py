@@ -9,6 +9,8 @@ from pydantic import BaseModel
 import logging
 import sys
 import uuid
+from utils.supabase.db import supabase
+from datetime import datetime
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, 
@@ -17,7 +19,8 @@ logger = logging.getLogger("job_search_api")
 
 # Load environment variables
 load_dotenv()
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+RAPIDAPI_KEY = ""
+
 
 # Add debug logging for API key
 if not RAPIDAPI_KEY:
@@ -32,6 +35,7 @@ router = APIRouter()
 
 # Define job search request model
 class JobSearchRequest(BaseModel):
+    user_id: str
     target_roles: List[str]
     primary_skills: Optional[List[str]] = []
     preferred_location: Optional[str] = ""
@@ -153,6 +157,65 @@ async def search_jobs(request: JobSearchRequest):
                 logger.error(f"Error in skills filtering: {str(filter_error)}")
                 # Continue with unfiltered jobs if filtering fails
                 filtered_jobs = all_jobs
+            
+            # Save search criteria to Supabase and get the generated ID
+            try:
+                # Convert target_roles and primary_skills lists to comma-separated strings
+                target_roles_str = ", ".join(request.target_roles)
+                primary_skills_str = ", ".join(request.primary_skills)
+                
+                # Prepare search data without ID (database will generate it)
+                search_data = {
+                    "user_id": request.user_id,
+                    "query": f"{target_roles_str} in {request.preferred_location}",
+                    "target_roles": target_roles_str,
+                    "primary_skills": primary_skills_str,
+                    "location": request.preferred_location,
+                    "job_types": request.job_type                    
+                }
+                
+                # Insert into Supabase and get the result
+                result = supabase.table("job_searches").insert(search_data).execute()
+                
+                # Extract the generated search_id from the result
+                if result.data and len(result.data) > 0:
+                    db_search_id = result.data[0]["id"]
+                    logger.info(f"Saved search criteria to database with generated ID: {db_search_id}")
+                else:
+                    logger.error("Failed to retrieve generated search ID from database")
+                    db_search_id = None
+            except Exception as db_error:
+                logger.error(f"Error saving search criteria to database: {str(db_error)}")
+                db_search_id = None
+            
+            # Save filtered jobs to database
+            try:
+                # Only save if we have filtered jobs and a valid search_id
+                if filtered_jobs and db_search_id:
+                    for job in filtered_jobs:
+                        job_data = {
+                            "search_id": db_search_id,  # Use the ID retrieved from the database
+                            "title": job.get("title", ""),
+                            "company": job.get("company", ""),
+                            "location": job.get("location", ""),
+                            "description": job.get("description", ""),
+                            "url": job.get("apply_url", ""),
+                            "date_posted": job.get("date_posted", ""),
+                            "job_type": job.get("job_type", ""),
+                            "skills_matched": ", ".join(job.get("job_matched_skills", {}).keys()),
+                            "total_skills": job.get("skill_match_score", 0)
+                        }
+                        supabase.table("filtered_jobs").insert(job_data).execute()
+                    
+                    logger.info(f"Saved {len(filtered_jobs)} filtered jobs to database")
+                else:
+                    if not db_search_id:
+                        logger.info("Not saving filtered jobs - missing search_id")
+                    else:
+                        logger.info("No filtered jobs to save to database")
+            except Exception as db_error:
+                logger.error(f"Error saving filtered jobs to database: {str(db_error)}")
+                # Continue with returning results even if DB save fails
             
             # Return results directly
             return {

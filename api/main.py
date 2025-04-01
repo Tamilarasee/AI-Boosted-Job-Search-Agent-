@@ -79,7 +79,7 @@ async def create_user_details(
         response = supabase.table("users").insert(user_data).execute()
 
         if response.data:
-            return {"success": True, "data": response.data[0]}
+            return {"success": True, "data": response.data[0], "user_id": supabase.auth.get_user().user.id}
         raise HTTPException(status_code=400, detail="Failed to save user details")
    
     except Exception as e:

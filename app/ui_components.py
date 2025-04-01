@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-import time
+
 
 
 API_URL = "http://localhost:8000"
@@ -96,6 +96,10 @@ def user_details_form():
                     )
                     if response.status_code == 200:
                         st.success("Details submitted successfully!")
+                        # Store user ID in session state from the response
+                        response_data = response.json()
+                        if 'user_id' not in st.session_state:   
+                            st.session_state.user_id = response_data["user_id"]
                         st.session_state.current_page = "job_preferences"
                         st.rerun()
                     else:
@@ -167,6 +171,7 @@ def job_preferences_form():
                     
                     # Create the request payload
                     payload = {
+                        "user_id": st.session_state.user_id,
                         "target_roles": target_roles_list,
                         "primary_skills": primary_skills_list,
                         "preferred_location": preferred_location,
