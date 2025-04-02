@@ -19,7 +19,7 @@ logger = logging.getLogger("job_search_api")
 
 # Load environment variables
 load_dotenv()
-RAPIDAPI_KEY = ""
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 
 
 # Add debug logging for API key
@@ -138,7 +138,7 @@ async def search_jobs(request: JobSearchRequest):
             all_jobs = process_linkedin_jobs(linkedin_jobs)
             logger.info(f"Processed {len(all_jobs)} jobs from LinkedIn")
             
-            # Filter jobs using existing filtering.py if skills provided
+            # Filter jobs using filtering.py if skills provided
             filtered_jobs = all_jobs
             try:
                 if request.primary_skills and len(request.primary_skills) > 0:
@@ -152,7 +152,7 @@ async def search_jobs(request: JobSearchRequest):
                     logger.info("Filtering jobs by skills...")
                     filtered_jobs, matched_skillset = filter_jobs(all_jobs, expanded_skills)
                     logger.info(f"Filtered down to {len(filtered_jobs)} jobs matching skills")
-                    print(f"FILTERED JOBS INGA IRUKU: {filtered_jobs}")
+                    print(f"FILTERED JOBS BY METADATA: {filtered_jobs}")
             except Exception as filter_error:
                 logger.error(f"Error in skills filtering: {str(filter_error)}")
                 # Continue with unfiltered jobs if filtering fails
@@ -164,7 +164,7 @@ async def search_jobs(request: JobSearchRequest):
                 target_roles_str = ", ".join(request.target_roles)
                 primary_skills_str = ", ".join(request.primary_skills)
                 
-                # Prepare search data without ID (database will generate it)
+
                 search_data = {
                     "user_id": request.user_id,
                     "query": f"{target_roles_str} in {request.preferred_location}",
@@ -203,7 +203,7 @@ async def search_jobs(request: JobSearchRequest):
                             "date_posted": job.get("date_posted", ""),
                             "job_type": job.get("job_type", ""),
                             "skills_matched": ", ".join(job.get("job_matched_skills", {}).keys()),
-                            "total_skills": job.get("skill_match_score", 0)
+                            "total_skills": job.get("skills_match_count", 0)
                         }
                         supabase.table("filtered_jobs").insert(job_data).execute()
                     
@@ -248,137 +248,6 @@ async def search_jobs(request: JobSearchRequest):
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error searching for jobs: {str(e)}")
-
-@router.get("/search/results/{search_id}")
-async def get_search_results(search_id: str):
-    """Get job search results by search ID"""
-    results = job_results_store.get(search_id, {
-        "status": "not_found",
-        "message": "Search results not found",
-        "jobs": [],
-        "total_jobs_found": 0,
-        "filtered_jobs_count": 0
-    })
-    return results
-
-async def fetch_jobs_in_background(search_id: str, request: JobSearchRequest):
-    """Fetch jobs using LinkedIn API in the background"""
-    logger.info(f"Starting background job search for ID: {search_id}")
-    logger.info(f"Search parameters: roles={request.target_roles}, location={request.preferred_location}, job_type={request.job_type}")
-    
-    try:
-        # Update status to searching
-        job_results_store[search_id] = {
-            "status": "searching",
-            "message": "Searching for jobs...",
-            "jobs": [],
-            "total_jobs_found": 0,
-            "filtered_jobs_count": 0
-        }
-        
-        # Set up the API call to LinkedIn Job Search API
-        url = "https://linkedin-job-search-api.p.rapidapi.com/active-jb-7d"
-        
-        # Format roles for title_filter
-        if len(request.target_roles) > 1:
-            # For multiple roles, combine with OR
-            title_filter = " OR ".join([f'"{role}"' for role in request.target_roles])
-        else:
-            # For single role, use as is
-            title_filter = f'"{request.target_roles[0]}"'
-        
-        # Format location for location_filter
-        location_filter = f'"{request.preferred_location}"'
-        
-        # Map job_type to LinkedIn's format
-        job_type_mapping = {
-            "full-time": "FULL_TIME",
-            "part-time": "PART_TIME",
-            "contract": "CONTRACTOR",
-            "internship": "INTERN",
-            "temporary": "TEMPORARY",
-            "volunteer": "VOLUNTEER"
-        }
-        
-        # Get the job type from the request
-        type_filter = job_type_mapping.get(request.job_type.lower(), "FULL_TIME")
-        
-        # Prepare request parameters using the exact structure required by the API
-        querystring = {
-            "limit": "50",  # Only one page to limit costs
-            "offset": "0",
-            "title_filter": title_filter,
-            "location_filter": location_filter,
-            "date_posted": "week",  # Last 7 days
-            "type_filter": type_filter,
-            "description_type": "text"  # Include job descriptions
-        }
-        
-        # Set up headers with RapidAPI key
-        headers = {
-            "x-rapidapi-key": RAPIDAPI_KEY,
-            "x-rapidapi-host": "linkedin-job-search-api.p.rapidapi.com"
-        }
-        
-        try:
-            # Make the API call - just once to limit costs
-            response = requests.get(url, headers=headers, params=querystring)
-            print(response)
-            # Check if the request was successful
-            if response.status_code == 200:
-                linkedin_jobs = response.json()
-                
-                # Process jobs
-                all_jobs = process_linkedin_jobs(linkedin_jobs)
-                
-                # Filter jobs using the existing filtering.py functionality
-                filtered_jobs = all_jobs
-                if request.primary_skills and len(request.primary_skills) > 0:
-                    # Import from your existing filtering module
-                    from filtering import expand_skills, filter_jobs
-                    
-                    # Expand skills using OpenAI
-                    expanded_skills = expand_skills(request.primary_skills)
-                    
-                    # Filter jobs by skills
-                    filtered_jobs, matched_skillset = filter_jobs(all_jobs, expanded_skills)
-                
-                # Update final results
-                job_results_store[search_id] = {
-                    "status": "complete",
-                    "message": f"Found {len(all_jobs)} jobs, {len(filtered_jobs)} match your skills",
-                    "jobs": filtered_jobs,
-                    "total_jobs_found": len(all_jobs),
-                    "filtered_jobs_count": len(filtered_jobs)
-                }
-            else:
-                # Handle API error
-                job_results_store[search_id] = {
-                    "status": "error",
-                    "message": f"API request failed with status code: {response.status_code}",
-                    "jobs": [],
-                    "total_jobs_found": 0,
-                    "filtered_jobs_count": 0
-                }
-        
-        except Exception as e:
-            job_results_store[search_id] = {
-                "status": "error",
-                "message": f"Error fetching jobs: {str(e)}",
-                "jobs": [],
-                "total_jobs_found": 0,
-                "filtered_jobs_count": 0
-            }
-    
-    except Exception as e:
-        # Handle exceptions
-        job_results_store[search_id] = {
-            "status": "error",
-            "message": f"Error in job search process: {str(e)}",
-            "jobs": [],
-            "total_jobs_found": 0,
-            "filtered_jobs_count": 0
-        }
 
 def process_linkedin_jobs(linkedin_jobs):
     """Process LinkedIn jobs into our standard format"""

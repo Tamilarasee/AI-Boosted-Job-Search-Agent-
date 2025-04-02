@@ -7,7 +7,8 @@ from api.resume_extraction import extract_pdf_text
 from api.search_rapidapi import router as search_router
 from io import BytesIO
 #from api.search_google_api import router as google_search_router
-
+from api.pinecone_sync import router as pinecone_router
+from api.pinecone_search import router as pinecone_search_router
 
 app = FastAPI()
 
@@ -102,3 +103,5 @@ async def create_user_details(
 
 app.include_router(search_router, prefix="/api")
 #app.include_router(google_search_router, prefix="/api")
+app.include_router(pinecone_router, prefix="/api")
+app.include_router(pinecone_search_router, prefix="/api")

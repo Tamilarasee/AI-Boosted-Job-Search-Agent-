@@ -157,6 +157,76 @@ def job_preferences_form():
         except Exception as e:
             st.error(f"API connection error: {str(e)}")
 
+    # Sync Jobs to Pinecone button
+    if st.button("Sync Jobs to Pinecone"):
+        try:
+            response = requests.post(f"{API_URL}/api/sync-pinecone")
+            if response.status_code == 200:
+                result = response.json()
+                st.success(f"Jobs synced to Pinecone successfully: {result.get('count', 0)} jobs processed")
+            else:
+                st.error(f"Failed to sync jobs to Pinecone. Status code: {response.status_code}")
+                try:
+                    st.error(f"Error details: {response.json()}")
+                except:
+                    st.error(f"Raw response: {response.text}")
+        except Exception as e:
+            st.error(f"Error syncing to Pinecone: {str(e)}")
+
+    # Search Pinecone button (New)
+    if st.button("Search Pinecone"):
+        try:
+            response = requests.post(
+                "http://localhost:8000/api/search-pinecone",
+                json={
+                    "user_id": st.session_state.user_id,
+                    "target_roles": target_roles,
+                    "primary_skills": primary_skills,
+                    "preferred_location": preferred_location,
+                    "job_type": job_type,
+                    "additional_preferences": additional_preferences
+                }
+            )
+            
+            if response.status_code == 200:
+                results = response.json()["results"]
+                
+                # Display results
+                for job in results:
+                    with st.container():
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            st.subheader(job["title"])
+                            st.write(f"🏢 {job['company']} | 📍 {job['location']}")
+                        
+                        with col2:
+                            # Display match percentage prominently
+                            st.metric(
+                                "Resume Match",
+                                f"{job['match_percentage']}%",
+                                delta=None,
+                                delta_color="normal"
+                            )
+                        
+                        # Job details
+                        st.write(f"**Type:** {job['job_type']}")
+                        st.write(f"**Posted:** {job['date_posted']}")
+                        if job.get('skills_matched'):
+                            st.write(f"**Matching Skills:** {job['skills_matched']}")
+                        
+                        # Add Apply button/link
+                        if job.get('url'):
+                            st.markdown(f"[Apply Now]({job['url']})")
+                        
+                        st.divider()  # Add separator between jobs
+                        
+            else:
+                st.error("Failed to fetch search results")
+            
+        except Exception as e:
+            st.error(f"Error during search: {str(e)}")
+
     # Submit button
     if st.button("Search Jobs"):
         if target_roles and primary_skills:
