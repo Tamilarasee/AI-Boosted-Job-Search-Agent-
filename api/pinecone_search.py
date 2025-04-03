@@ -4,9 +4,11 @@ from typing import List, Optional
 import logging
 import sys
 from utils.supabase.db import supabase
-from litellm import completion
+from litellm import completion, acompletion
 from dotenv import load_dotenv
 from utils.pinecone.vector_db import index as pinecone_index
+import asyncio
+import json
 
 load_dotenv()
 
@@ -46,7 +48,7 @@ async def generate_optimized_query(search_context: dict) -> str:
         Focus on key skills, experience level, and job requirements that match the resume.
         """
         
-        response = completion(
+        response = await acompletion(
             model="gpt-4o-mini",  
             messages=[{
                 "role": "system",
@@ -129,6 +131,128 @@ async def fetch_job_details_from_supabase(pinecone_results) -> List[dict]:
             detail="Failed to fetch complete job details"
         )
 
+async def analyze_job_fit_and_provide_tips(user_profile_text: str, job_details: dict) -> dict:
+    """
+    Analyzes the fit between a user's profile and a specific job, providing actionable insights.
+
+    Args:
+        user_profile_text: The concatenated text of the user's resume.
+        job_details: A dictionary containing details of a single job 
+                     (should include 'title', 'company', 'description', etc.).
+
+    Returns:
+        A dictionary containing the analysis results (missing skills, learning time, tips).
+        Returns an empty dict if analysis fails.
+    """
+    logger.info(f"Analyzing job fit for job ID {job_details.get('id', 'N/A')} and user...")
+    
+    # Default structure for results
+    analysis_results = {
+        "missing_skills": [], # Will be list of {"skill": "...", "learn_time_estimate": "..."}
+        "resume_suggestions": {
+            "highlight": [],
+            "consider_removing": []
+        }
+    }
+
+    try:
+        # --- Step 3: Construct Prompt and Call LLM ---
+        job_description = job_details.get('description', '')
+        job_title = job_details.get('title', 'this job')
+        
+        # Ensure we have necessary details to proceed
+        if not user_profile_text or not job_description:
+             logger.warning(f"Missing user profile or job description for job {job_details.get('id', 'N/A')}. Skipping analysis.")
+             return {} # Return empty if essential info is missing
+
+        prompt = f"""
+        Analyze the alignment between the provided User Profile (Resume) and the Job Description.
+        Identify skill gaps and provide resume tailoring suggestions.
+
+        **User Profile (Resume Text):**
+        ```
+        {user_profile_text} 
+        ```
+        **(Resume truncated to first 3000 chars if longer)**
+
+        **Job Description for "{job_title}":**
+        ```
+        {job_description[:4000]}
+        ```
+        **(Job Description truncated to first 4000 chars if longer)**
+
+        **Analysis Tasks:**
+
+        1.  **Identify Top 3 Missing Skills:** List the top 3 most important skills or qualifications mentioned in the Job Description that are NOT present in the User Profile. The user might have written that skill in abbreviation or in any other way in the resume. Look out carefully.
+        2.  **Estimate Learning Time for Each Missing Skill:** For EACH missing skill identified above, estimate the time needed for this specific user (considering their existing profile) to learn it sufficiently to complete a relevant project or earn a certification. 
+        State the estimate clearly (e.g., "2-4 weeks, 2 hours per day (project focus)", "1 month, 2 hours per day (certification focus)").
+        Also provide a short one liner of example projects or certifications that the user can do to learn the skill.
+            
+        3.  **Provide Resume Tailoring Suggestions:**
+            *   **Highlight:** List 2-3 specific skills or experiences ALREADY MENTIONED but NOT highlighted in the User Profile that are particularly relevant to this Job Description and should be emphasized. Do not include if they have emphasized it enough in the resume. If it is not well written, suggest how to write it better or say that it is not well written.
+            *   **Consider Removing:** List 1-2 items in the User Profile that seem LEAST relevant to this specific job and could potentially be removed to make space for more relevant points. Be cautious and phrase as suggestions.
+
+        **Output Format:**
+        Please provide the response ONLY as a valid JSON object with the following exact structure:
+        {{
+          "missing_skills": [
+            {{"skill": "Example Skill 1", "learn_time_estimate": "Example Time 1"}},
+            {{"skill": "Example Skill 2", "learn_time_estimate": "Example Time 2"}},
+            {{"skill": "Example Skill 3", "learn_time_estimate": "Example Time 3"}}
+          ],
+          "resume_suggestions": {{
+            "highlight": ["Example Highlight 1", "Example Highlight 2"],
+            "consider_removing": ["Example Removal Suggestion 1"]
+          }}
+        }}
+        Ensure the output is ONLY the JSON object, without any introductory text or explanations.
+        """
+
+        # Use the asynchronous version: acompletion
+        response = await acompletion(
+            model="gpt-4o-mini", 
+            messages=[{
+                "role": "system", 
+                "content": "You are a helpful career advisor AI analyzing job fit and providing actionable advice. Respond ONLY in the specified JSON format."
+             },{
+                 "role": "user", 
+                 "content": prompt
+            }],
+            response_format={ "type": "json_object" }, # Enforce JSON output if model supports it
+            max_tokens=500, # Adjust as needed
+            temperature=0.5 # Adjust for creativity vs consistency
+        )
+
+        # --- Parse the LLM response ---
+        try:
+            llm_output_text = response.choices[0].message.content.strip()
+            # Attempt to parse the JSON
+            parsed_output = json.loads(llm_output_text)
+            
+            # Basic validation (can be made more robust)
+            if isinstance(parsed_output, dict) and \
+               "missing_skills" in parsed_output and \
+               "resume_suggestions" in parsed_output:
+                analysis_results = parsed_output
+            else:
+                 logger.error(f"LLM output for job {job_details.get('id', 'N/A')} is not in expected JSON structure: {llm_output_text}")
+                 # Keep default empty results
+
+        except json.JSONDecodeError:
+            logger.error(f"Failed to decode LLM JSON output for job {job_details.get('id', 'N/A')}: {llm_output_text}")
+            # Keep default empty results
+        except Exception as parse_err:
+             logger.error(f"Error parsing LLM response for job {job_details.get('id', 'N/A')}: {str(parse_err)}")
+             # Keep default empty results
+
+    except Exception as e:
+        logger.error(f"Error during LLM call for job fit analysis (Job ID {job_details.get('id', 'N/A')}): {str(e)}")
+        # Return default empty structure on failure
+        return {} # Returning the default structure defined at the start
+
+    logger.info(f"Analysis complete for job ID {job_details.get('id', 'N/A')}")
+    return analysis_results
+
 @router.post("/search-pinecone")
 async def search_pinecone_endpoint(request: PineconeSearchRequest):
     logger.info(f"Received Pinecone search request for user: {request.user_id}")
@@ -180,18 +304,61 @@ async def search_pinecone_endpoint(request: PineconeSearchRequest):
     # Fetch full job details and format for UI
     complete_job_results = await fetch_job_details_from_supabase(pinecone_results)
     
-    # Format results for UI display
-    formatted_results = [{
-        **job,
-        'match_percentage': round(job['similarity_score'] * 100, 1),  # Convert score to percentage
-        'match_text': f"{round(job['similarity_score'] * 100)}% Match"  # Ready-to-display text
-    } for job in complete_job_results]
-    
+    # --- Step 1 & 4: Prepare and run analysis concurrently ---
+    top_jobs_for_analysis = complete_job_results[:5] # Analyze top 5 jobs
+    analysis_tasks = []
+    job_ids_for_analysis = [] # Keep track of IDs for merging later
+
+    logger.info(f"Starting analysis for top {len(top_jobs_for_analysis)} jobs...")
+    for job in top_jobs_for_analysis:
+        # Ensure job has an ID and description before creating task
+        if job.get('id') and job.get('description'):
+             task = asyncio.create_task(
+                 analyze_job_fit_and_provide_tips(resume_text, job)
+             )
+             analysis_tasks.append(task)
+             job_ids_for_analysis.append(job['id']) # Store ID corresponding to task order
+        else:
+            logger.warning(f"Skipping analysis for job due to missing ID or description: {job.get('title', 'N/A')}")
+
+    # Run tasks concurrently and wait for all to complete
+    analysis_outputs = []
+    if analysis_tasks:
+        try:
+             # Wait for all analysis tasks to complete
+             analysis_outputs = await asyncio.gather(*analysis_tasks)
+             logger.info(f"Completed analysis for {len(analysis_outputs)} jobs.")
+        except Exception as e:
+            logger.error(f"Error during concurrent job analysis: {str(e)}")
+            # analysis_outputs will remain empty or partially filled; proceed gracefully
+
+    # --- Step 5: Integrate Results ---
+    # Create a map of job_id -> analysis_result
+    analysis_map = {
+        job_id: result 
+        for job_id, result in zip(job_ids_for_analysis, analysis_outputs) 
+        if result # Only include successful analyses (non-empty dicts)
+    }
+
+    # --- Format results for UI (Now including analysis) ---
+    formatted_results = []
+    for job in complete_job_results:
+        job_id = job.get('id')
+        analysis_data = analysis_map.get(job_id, {}) # Get analysis if available, else empty dict
+        
+        formatted_results.append({
+            **job,
+            'match_percentage': round(job.get('similarity_score', 0) * 100, 1), # Added .get for safety
+            'match_text': f"{round(job.get('similarity_score', 0) * 100)}% Match",
+            'analysis': analysis_data # Add the analysis results here
+        })
+
+    logger.info(f"Returning {len(formatted_results)} results to UI.")
+    logger.info(f"Formatted results: {formatted_results[0]}")
     return {
         "status": "success",
         "query": optimized_query,
-        "results": formatted_results,
+        "results": formatted_results, # Now includes analysis results
         "total_results": len(formatted_results)
     }
 
-# Add helper functions below (e.g., for fetching resume, calling LLM, querying Pinecone)

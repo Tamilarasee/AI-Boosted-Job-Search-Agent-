@@ -189,40 +189,83 @@ def job_preferences_form():
             )
             
             if response.status_code == 200:
-                results = response.json()["results"]
-                
-                # Display results
-                for job in results:
-                    with st.container():
-                        col1, col2 = st.columns([3, 1])
-                        
-                        with col1:
-                            st.subheader(job["title"])
-                            st.write(f"🏢 {job['company']} | 📍 {job['location']}")
-                        
-                        with col2:
-                            # Display match percentage prominently
-                            st.metric(
-                                "Resume Match",
-                                f"{job['match_percentage']}%",
-                                delta=None,
-                                delta_color="normal"
-                            )
-                        
-                        # Job details
-                        st.write(f"**Type:** {job['job_type']}")
-                        st.write(f"**Posted:** {job['date_posted']}")
-                        if job.get('skills_matched'):
-                            st.write(f"**Matching Skills:** {job['skills_matched']}")
-                        
-                        # Add Apply button/link
-                        if job.get('url'):
-                            st.markdown(f"[Apply Now]({job['url']})")
-                        
-                        st.divider()  # Add separator between jobs
-                        
+                results_data = response.json()
+                results = results_data.get("results", [])
+                query_used = results_data.get("query", "N/A")
+
+                st.info(f"Showing {len(results)} results for query: \"{query_used}\"")
+                st.divider()
+
+                if not results:
+                    st.warning("No matching jobs found in the vector database for your profile and preferences.")
+                else:
+                    # Display results
+                    for job in results:
+                        with st.container(border=True): # Add a border for better separation
+                            col1, col2 = st.columns([3, 1])
+
+                            with col1:
+                                st.subheader(f"{job.get('title', 'N/A')}")
+                                st.write(f"🏢 {job.get('company', 'N/A')} | 📍 {job.get('location', 'N/A')}")
+                                st.write(f"**Type:** {job.get('job_type', 'N/A')} | **Posted:** {job.get('date_posted', 'N/A')}")
+                                if job.get('url'):
+                                    st.link_button("Apply Now 🔗", job['url'])
+
+                            with col2:
+                                st.metric(
+                                    "Resume Match",
+                                    f"{job.get('match_percentage', 0):.1f}%", # Format to 1 decimal place
+                                    delta=None
+                                )
+                                if job.get('skills_matched'): # Display skills matched from original filtering if available
+                                     st.caption(f"Matched Skills: {job['skills_matched']}")
+
+
+                            # --- Display Analysis Section ---
+                            analysis = job.get('analysis', {})
+                            print("\nAnalysis:", analysis)
+                            if analysis: # Only show expander if analysis data exists
+                                with st.expander("🔍 Show AI Analysis & Tips"):
+                                    st.markdown("**Missing Skills & Learning Time:**")
+                                    missing_skills = analysis.get('missing_skills', [])
+                                    if missing_skills:
+                                        for item in missing_skills:
+                                            skill = item.get('skill', 'N/A')
+                                            estimate = item.get('learn_time_estimate', 'N/A')
+                                            st.write(f"- **{skill}:** {estimate}")
+                                    else:
+                                        st.write("_No specific skill gaps identified or analysis failed._")
+
+                                    st.markdown("**Resume Tailoring Suggestions:**")
+                                    suggestions = analysis.get('resume_suggestions', {})
+                                    highlights = suggestions.get('highlight', [])
+                                    removals = suggestions.get('consider_removing', [])
+
+                                    if highlights:
+                                        st.markdown("**Consider Highlighting:**")
+                                        for item in highlights:
+                                            st.write(f"- {item}")
+
+                                    if removals:
+                                         st.markdown("**Consider Removing/De-emphasizing:**")
+                                         for item in removals:
+                                             st.write(f"- {item}")
+
+                                    if not highlights and not removals:
+                                         st.write("_No specific resume tailoring suggestions provided._")
+                            else:
+                                 # Optionally indicate that analysis wasn't performed for this job
+                                 st.caption("_AI analysis not available for this job._")
+
+                            # Removed the extra st.divider() inside the loop for cleaner look
+                    st.divider() # Keep one divider after the loop
+
             else:
-                st.error("Failed to fetch search results")
+                try:
+                    error_detail = response.json().get("detail", "Unknown error")
+                except:
+                    error_detail = response.text
+                st.error(f"Failed to fetch search results ({response.status_code}): {error_detail}")
             
         except Exception as e:
             st.error(f"Error during search: {str(e)}")
