@@ -101,9 +101,9 @@ def search_pinecone_jobs(query: str, top_k: int = 10):
             fields=["_id","_score"])
 
         logger.info(f"Pinecone search (dynamic init) raw results: {results}")
-
+        
         return results
-
+        
     except Exception as e:
         # ... (keep error handling) ...
         logger.error(f"Error querying Pinecone (dynamic init): {str(e)}")

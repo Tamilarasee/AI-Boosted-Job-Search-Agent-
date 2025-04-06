@@ -15,7 +15,6 @@ def main():
     pages = {
         "login": login_form,
         "register": registration_form,
-        "user_details": user_details_form,
         "job_preferences": job_preferences_form,
         "career_insights": career_insights_page
     }
