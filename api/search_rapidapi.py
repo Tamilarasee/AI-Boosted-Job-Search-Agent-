@@ -34,7 +34,7 @@ logger = logging.getLogger("job_search_api")
 # Load environment variables
 load_dotenv()
 #RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-RAPIDAPI_KEY = ""
+RAPIDAPI_KEY = "8e2898eeffmsh9725adeabfc7c63p143618jsn552c1722ee91"
 
 # Add debug logging for API key
 if not RAPIDAPI_KEY:
@@ -275,13 +275,48 @@ async def save_search_criteria(request: JobSearchRequest) -> Optional[int]:
         return None # Return None on failure
 
 async def save_filtered_jobs_to_db(filtered_jobs: List[Dict], db_search_id: int):
-    """Saves a list of filtered jobs to the Supabase 'filtered_jobs' table."""
-    if not filtered_jobs:
-        logger.info("No jobs provided to save_filtered_jobs_to_db.")
-        return # Nothing to do
-    if not db_search_id:
+    """
+    Deletes existing rows and saves a list of filtered jobs
+    to the Supabase 'filtered_jobs' table.
+    """
+    if not db_search_id: # Need search ID for saving, but maybe not for deleting all?
         logger.error("Cannot save filtered jobs: Missing database search ID.")
-        return # Cannot proceed without the foreign key
+        # Decide if deletion should proceed even if saving is impossible
+        # return
+
+    logger = logging.getLogger(__name__) # Use local logger if not global
+    loop = asyncio.get_running_loop()
+
+    # --- Step 1: Delete existing rows ---
+    logger.warning("Attempting to delete ALL existing rows from 'filtered_jobs' table...")
+    try:
+        delete_result = await loop.run_in_executor(
+            None,
+            # Delete all rows. Add .eq('user_id', user_id) or similar if needed.
+            lambda: supabase.table("filtered_jobs").delete().neq("id", 0).execute() 
+            # Using .neq("id", 0) as a common way to target all rows if .delete() needs a filter
+            # Check Supabase client docs for the best way to delete all if this fails
+        )
+        # Log deletion result - structure may vary
+        if hasattr(delete_result, 'data') and delete_result.data is not None:
+             logger.info(f"Deletion from 'filtered_jobs' successful (affected rows might be in data): {delete_result.data}")
+        elif hasattr(delete_result, 'error') and delete_result.error:
+             logger.error(f"Supabase delete failed with error: {delete_result.error}")
+             # Decide if we should stop or continue with insert despite delete failure
+        else:
+             logger.warning(f"Supabase delete completed, but response format unexpected: {delete_result}")
+
+    except Exception as delete_err:
+        logger.error(f"Error deleting from 'filtered_jobs' table: {str(delete_err)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Decide whether to proceed with insert if delete fails
+        logger.warning("Proceeding with insert despite potential delete failure.")
+
+    # --- Step 2: Insert new rows (existing logic) ---
+    if not filtered_jobs:
+        logger.info("No new jobs provided to insert after deletion attempt.")
+        return # Nothing to insert
 
     logger.info(f"Attempting to save {len(filtered_jobs)} filtered jobs to database for search ID: {db_search_id}...")
     
@@ -289,59 +324,46 @@ async def save_filtered_jobs_to_db(filtered_jobs: List[Dict], db_search_id: int)
     prep_errors = 0
     for job in filtered_jobs:
         try:
-            # Prepare job data dictionary matching Supabase table columns
-            # Perform necessary data type conversions or checks here
             job_data = {
                 "search_id": db_search_id,
                 "title": job.get("title", ""),
                 "company": job.get("company", ""),
                 "location": job.get("location", ""),
                 "description": job.get("description", ""),
-                "url": job.get("apply_url", job.get("url", "")), # Prioritize apply_url
-                "date_posted": job.get("date_posted", ""), # Ensure format is DB compatible
+                "url": job.get("apply_url", job.get("url", "")),
+                "date_posted": job.get("date_posted", ""),
                 "job_type": job.get("job_type", ""),
-                # Handle skills_matched - assuming it needs to be a string
                 "skills_matched": ", ".join(job.get("job_matched_skills", {}).keys()) if isinstance(job.get("job_matched_skills"), dict) else "",
                 "total_skills": job.get("skills_match_count", 0)
-                # Add/remove fields to exactly match your 'filtered_jobs' table schema
             }
             jobs_to_insert.append(job_data)
         except Exception as e:
             prep_errors += 1
             logger.warning(f"Error preparing job data for DB save (ID: {job.get('id', 'N/A')}, Title: {job.get('title', 'N/A')}): {str(e)}")
 
-    if prep_errors > 0:
-         logger.warning(f"{prep_errors} jobs skipped during data preparation for DB save.")
-
+    if prep_errors > 0: logger.warning(f"{prep_errors} jobs skipped preparation.")
     if not jobs_to_insert:
         logger.warning("No jobs remaining to insert into database after preparation.")
         return
 
     try:
         logger.info(f"Inserting {len(jobs_to_insert)} prepared jobs into Supabase table 'filtered_jobs'...")
-        # --- Database Interaction ---
-        loop = asyncio.get_running_loop()
+        # ... (keep existing insert logic using run_in_executor) ...
         insert_result = await loop.run_in_executor(
              None,
              lambda: supabase.table("filtered_jobs").insert(jobs_to_insert).execute()
         )
-        # --- End Database Interaction ---
-
-        # Log success/failure based on response
-        # Supabase batch insert might not return detailed row data, check for basic success indication
+        # ... (keep existing insert result logging) ...
         if hasattr(insert_result, 'data') and insert_result.data is not None:
-             # Simplistic check, adjust based on actual Supabase client response
              logger.info(f"Successfully initiated insert for {len(jobs_to_insert)} jobs.")
         elif hasattr(insert_result, 'error') and insert_result.error:
              logger.error(f"Supabase insert failed with error: {insert_result.error}")
         else:
-             logger.warning(f"Supabase insert for filtered jobs completed, but response format unexpected: {insert_result}")
+             logger.warning(f"Supabase insert response format unexpected: {insert_result}")
 
     except Exception as db_error:
+        # ... (keep existing insert error logging) ...
         logger.error(f"Error inserting filtered jobs into database: {str(db_error)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        # Do not raise here, allow the main flow to continue if possible
 
 # --- Block 3: Refactor the /search endpoint (Orchestration Logic) ---
 @router.post("/search")
