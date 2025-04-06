@@ -1,9 +1,11 @@
 import streamlit as st
 from ui_components import *
 
+# Set page config as the first Streamlit command
+st.set_page_config(layout="wide")
 
 def main():
-    st.title("AI-powered Job Search Agent")
+    st.title("AI-Boosted Job Search Agent")
 
     # Initialize session state for navigation
     if 'current_page' not in st.session_state:
@@ -14,7 +16,8 @@ def main():
         "login": login_form,
         "register": registration_form,
         "user_details": user_details_form,
-        "job_preferences": job_preferences_form
+        "job_preferences": job_preferences_form,
+        "career_insights": career_insights_page
     }
 
     # Display the current page

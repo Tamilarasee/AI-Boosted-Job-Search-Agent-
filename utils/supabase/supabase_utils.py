@@ -1,7 +1,8 @@
 from fastapi import HTTPException
-from typing import List, Dict
+from typing import List, Dict, Optional
 import logging
 import sys
+import asyncio
 from utils.supabase.db import supabase
 from dotenv import load_dotenv
 
@@ -108,3 +109,51 @@ async def fetch_user_profile(user_id: str) -> str:
             status_code=500,
             detail=f"Internal server error while fetching resume data for user {user_id}"
         )
+
+async def update_consolidated_gaps(search_id: int, gaps_data: Dict):
+    """
+    Updates the job_searches table with the consolidated skill gaps JSON.
+
+    Args:
+        search_id: The ID of the job_searches record to update.
+        gaps_data: The dictionary containing the consolidated gaps (e.g., {'top_gaps': [...]}).
+    """
+    logger = logging.getLogger(__name__)
+    if not search_id:
+        logger.error("Cannot update consolidated gaps: Missing search_id.")
+        return
+    # Ensure gaps_data is a dict, even if empty (like {'top_gaps': []})
+    if not isinstance(gaps_data, dict):
+         logger.error(f"Invalid gaps_data format for search_id {search_id}: {gaps_data}")
+         return # Or assign a default empty dict
+
+    logger.info(f"Attempting to update consolidated_skill_gaps for search_id: {search_id}")
+    try:
+        # Prepare the update payload
+        update_payload = {"consolidated_skill_gaps": gaps_data} # Assumes column name is 'consolidated_skill_gaps'
+
+        # --- Database Interaction ---
+        loop = asyncio.get_running_loop()
+        update_result = await loop.run_in_executor(
+            None,
+            lambda: supabase.table("job_searches")
+                        .update(update_payload)
+                        .eq("id", search_id)
+                        .execute()
+        )
+        # --- End Database Interaction ---
+
+        # Log result
+        if hasattr(update_result, 'data') and update_result.data:
+            logger.info(f"Successfully updated consolidated_skill_gaps for search_id: {search_id}")
+        elif hasattr(update_result, 'error') and update_result.error:
+            logger.error(f"Failed to update consolidated_skill_gaps for search_id {search_id}: {update_result.error}")
+        else:
+            # Check if maybe no rows were updated (e.g., ID didn't match)
+            logger.warning(f"Update consolidated_skill_gaps for search_id {search_id} completed, but response format unexpected or no rows matched: {update_result}")
+
+    except Exception as e:
+        logger.error(f"Error updating consolidated_skill_gaps for search_id {search_id}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Don't raise, log the error

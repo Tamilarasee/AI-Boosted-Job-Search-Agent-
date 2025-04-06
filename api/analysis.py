@@ -3,6 +3,7 @@ import sys
 from litellm import acompletion
 from dotenv import load_dotenv
 import json
+from typing import List, Dict
 
 
 load_dotenv()
@@ -61,7 +62,7 @@ async def analyze_job_fit_and_provide_tips(user_profile_text: str, job_details: 
 
         **Job Description for "{job_title}":**
         ```
-        {job_description[:4000]}
+        {job_description}
         ```
         **(Job Description truncated to first 4000 chars if longer)**
 
@@ -137,3 +138,110 @@ async def analyze_job_fit_and_provide_tips(user_profile_text: str, job_details: 
 
     logger.info(f"Analysis complete for job ID {job_details.get('id', 'N/A')}")
     return analysis_results
+
+async def consolidate_skill_gaps(user_profile_text: str, all_analysis_results: List[Dict]) -> Dict:
+    """
+    Analyzes a list of individual job analyses to find the top 3 consolidated skill gaps.
+
+    Args:
+        user_profile_text: The concatenated text of the user's resume.
+        all_analysis_results: A list of dictionaries, where each dictionary is the
+                              output of analyze_job_fit_and_provide_tips for a single job.
+
+    Returns:
+        A dictionary containing the top 3 consolidated gaps, e.g.,
+        {'top_gaps': [{'skill': '...', 'learn_time_estimate': '...'}]}
+        Returns an empty dict if consolidation fails or no skills found.
+    """
+    logger.info("Starting consolidation of skill gaps...")
+    consolidated_results = {"top_gaps": []}
+    
+    # --- 1. Aggregate all missing skills ---
+    all_missing_skills_details = []
+    for analysis in all_analysis_results:
+        # Ensure the analysis dict and missing_skills list exist and are valid
+        if isinstance(analysis, dict) and "missing_skills" in analysis and isinstance(analysis["missing_skills"], list):
+             all_missing_skills_details.extend(analysis["missing_skills"])
+
+    if not all_missing_skills_details:
+        logger.info("No missing skills found across analyzed jobs to consolidate.")
+        return consolidated_results # Return empty if no skills to process
+
+    # Optional: Add frequency count here if desired, but LLM can infer from repetition too
+    # skill_counts = {}
+    # for item in all_missing_skills_details:
+    #     skill_name = item.get('skill')
+    #     if skill_name:
+    #         skill_counts[skill_name] = skill_counts.get(skill_name, 0) + 1
+    
+    # Format for prompt (just list them out)
+    missing_skills_text = "\n".join([f"- {item.get('skill', 'N/A')} (Est: {item.get('learn_time_estimate', 'N/A')})" for item in all_missing_skills_details])
+
+    # --- 2. Construct Prompt and Call LLM ---
+    try:
+        prompt = f"""
+        Analyze the following list of potential skill gaps identified across multiple job applications for the user profile provided below.
+
+        **User Profile (Resume Text):**
+        ```
+        {user_profile_text}
+        ```
+        **(Resume truncated)**
+
+        **List of Potential Skill Gaps from Job Analyses:**
+        ```
+        {missing_skills_text}
+        ```
+
+        **Task:**
+        Identify the **Top 3 most impactful or frequently recurring skill gaps** from the list above that this user should prioritize learning to improve their job prospects, considering their existing profile. For each of these Top 3 skills:
+        1.  State the skill name clearly.
+        2.  Provide a concise, synthesized learning time estimate (e.g., "Approx. 3-5 weeks project focus", "Around 1 month for certification") based on the estimates provided and the user's profile. Include a brief example project/cert idea.
+
+        **Output Format:**
+        Respond ONLY with a valid JSON object with the following structure:
+        {{
+          "top_gaps": [
+            {{"skill": "Consolidated Skill 1", "learn_time_estimate": "Consolidated Estimate 1 with project/cert idea"}},
+            {{"skill": "Consolidated Skill 2", "learn_time_estimate": "Consolidated Estimate 2 with project/cert idea"}},
+            {{"skill": "Consolidated Skill 3", "learn_time_estimate": "Consolidated Estimate 3 with project/cert idea"}}
+          ]
+        }}
+        If fewer than 3 significant recurring gaps are found, return fewer items in the list. If no significant gaps, return an empty list. Ensure the output is ONLY the JSON object.
+        """
+
+        response = await acompletion(
+            model="gpt-4o", # Or preferred model
+            messages=[{
+                "role": "system",
+                "content": "You are a helpful career advisor AI summarizing key skill gaps for a user. Respond ONLY in the specified JSON format."
+             },{
+                 "role": "user",
+                 "content": prompt
+            }],
+            response_format={ "type": "json_object" },
+            max_tokens=400, # Adjust as needed
+            temperature=0.4
+        )
+
+        # --- 3. Parse Response ---
+        try:
+            llm_output_text = response.choices[0].message.content.strip()
+            parsed_output = json.loads(llm_output_text)
+            # Validate structure
+            if isinstance(parsed_output, dict) and "top_gaps" in parsed_output and isinstance(parsed_output["top_gaps"], list):
+                consolidated_results = parsed_output
+                logger.info(f"Consolidated top gaps identified: {len(consolidated_results['top_gaps'])}")
+            else:
+                logger.error(f"Consolidated skills LLM output not in expected JSON structure: {llm_output_text}")
+
+        except json.JSONDecodeError:
+             logger.error(f"Failed to decode consolidated skills LLM JSON output: {llm_output_text}")
+        except Exception as parse_err:
+             logger.error(f"Error parsing consolidated skills LLM response: {str(parse_err)}")
+
+    except Exception as e:
+        logger.error(f"Error during LLM call for skill gap consolidation: {str(e)}")
+        # Return default empty structure on failure
+
+    return consolidated_results

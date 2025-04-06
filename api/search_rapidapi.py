@@ -15,7 +15,8 @@ import asyncio
 from utils.supabase.supabase_utils import (
     fetch_user_profile,
     fetch_all_supabase_filtered_jobs,
-    fetch_job_details_from_supabase
+    fetch_job_details_from_supabase,
+    update_consolidated_gaps
 )
 from utils.pinecone.pinecone_utils import (
     generate_optimized_query,
@@ -23,7 +24,7 @@ from utils.pinecone.pinecone_utils import (
     sync_jobs_to_pinecone_utility,
     search_pinecone_jobs
 )
-from api.analysis import analyze_job_fit_and_provide_tips
+from api.analysis import analyze_job_fit_and_provide_tips, consolidate_skill_gaps
 
 
 # Configure logging first
@@ -456,10 +457,13 @@ async def search_jobs_orchestrator(request: JobSearchRequest):
     # --- Step E: Fetch Details & Analyze ---
     logger.info("Step E: Fetching details and analyzing...")
     analyzed_pinecone_jobs = []
+    consolidated_gaps = {} # Initialize empty
+    db_search_id_to_update = db_search_id # Capture search ID from Step B for update
+    
     try:
-        complete_job_results = await fetch_job_details_from_supabase(pinecone_results) # Utility call
+        complete_job_results = await fetch_job_details_from_supabase(pinecone_results)
         if complete_job_results:
-            user_profile_text = await fetch_user_profile(request.user_id) # Utility call (fetch again needed here)
+            user_profile_text = await fetch_user_profile(request.user_id)
             top_jobs_for_analysis = complete_job_results[:5]
             
             analysis_tasks = [
@@ -471,11 +475,30 @@ async def search_jobs_orchestrator(request: JobSearchRequest):
             analysis_outputs = []
             if analysis_tasks:
                 analysis_outputs = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+            
+            successful_analyses = [r for r in analysis_outputs if isinstance(r, dict) and r]
 
-            # Merge results (simplified logic shown, see previous full example for detail)
+            # --- Call Consolidation Function ---
+            if successful_analyses:
+                 logger.info(f"Consolidating skill gaps from {len(successful_analyses)} analyses...")
+                 consolidated_gaps = await consolidate_skill_gaps(user_profile_text, successful_analyses)
+                 
+                 # --- NEW: Update Supabase with Consolidated Gaps ---
+                 if db_search_id_to_update and consolidated_gaps:
+                      logger.info(f"Attempting to save consolidated gaps to DB for search_id {db_search_id_to_update}")
+                      # Call the update utility function (fire and forget for now, or await if critical)
+                      asyncio.create_task(update_consolidated_gaps(db_search_id_to_update, consolidated_gaps))
+                 elif not db_search_id_to_update:
+                      logger.warning("Cannot save consolidated gaps: db_search_id is missing.")
+                 # --- End Update Call ---
+                 
+            else:
+                 logger.info("No successful individual analyses to consolidate.")
+
+            # Merge individual results (as before)
             analysis_map = {
                 job_id: result
-                for job_id, result in zip(job_ids_for_analysis, analysis_outputs)
+                for job_id, result in zip(job_ids_for_analysis, successful_analyses)
                 if result and not isinstance(result, Exception)
             }
 
@@ -496,14 +519,15 @@ async def search_jobs_orchestrator(request: JobSearchRequest):
          # Don't fail the whole request, just return potentially empty results
          # Consider raising if profile fetch fails, maybe?
 
-    # --- Step F: Return Results ---
-    logger.info(f"Step F: Returning {len(analyzed_pinecone_jobs)} analyzed jobs.")
+    # --- Step F: Return Results (includes consolidated gaps) ---
+    logger.info(f"Step F: Returning {len(analyzed_pinecone_jobs)} analyzed jobs and consolidated gaps.")
     return {
         "status": "complete",
         "message": f"Found and analyzed {len(analyzed_pinecone_jobs)} jobs matching your profile.",
+        "overall_skill_gaps": consolidated_gaps.get("top_gaps", []), # Still return for immediate UI display
         "jobs": analyzed_pinecone_jobs,
-        "total_jobs_found": len(analyzed_pinecone_jobs), # Or adjust meaning
-        "filtered_jobs_count": len(analyzed_pinecone_jobs), # Or adjust meaning
+        "total_jobs_found": len(analyzed_pinecone_jobs),
+        "filtered_jobs_count": len(analyzed_pinecone_jobs),
         "search_query_used": optimized_query
     }
 
