@@ -98,7 +98,7 @@ def search_pinecone_jobs(query: str, top_k: int = 10):
                 "inputs": {"text": query},
                 "top_k": top_k
             },
-            fields=["_id","_score"]  )
+            fields=["_id","_score"])
 
         logger.info(f"Pinecone search (dynamic init) raw results: {results}")
 
