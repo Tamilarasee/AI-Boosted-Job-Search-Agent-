@@ -89,17 +89,6 @@ async def create_user_details(
         print(f"Error: {str(e)}\n{error_details}")
         raise HTTPException(status_code=500, detail=f"Error processing resumes: {str(e)}")
     
-# @app.post("/search/jobs")
-# async def search_jobs(preferences: JobPreferences):
-#     try:
-#         # Just log and return for now
-#         print(f"Received job preferences: {preferences}")
-        
-#         # We'll implement the actual search later
-#         return {"status": "received", "preferences": preferences.model_dump()}
-#     except Exception as e:
-#         print(f"Error in job search: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Failed to process job search")
 
 app.include_router(search_router, prefix="/api")
 #app.include_router(google_search_router, prefix="/api")

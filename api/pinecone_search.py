@@ -1,14 +1,16 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import List, Optional
 import logging
 import sys
 from utils.supabase.db import supabase
-from litellm import completion, acompletion
+from litellm import acompletion
 from dotenv import load_dotenv
 from utils.pinecone.vector_db import index as pinecone_index
 import asyncio
-import json
+from api.analysis import analyze_job_fit_and_provide_tips
+from utils.pinecone.pinecone_utils import generate_optimized_query, search_pinecone_jobs
+from utils.supabase.supabase_utils import fetch_job_details_from_supabase
 
 load_dotenv()
 
@@ -29,229 +31,7 @@ class PineconeSearchRequest(BaseModel):
 # Create router
 router = APIRouter()
 
-async def generate_optimized_query(search_context: dict) -> str:
-    """Generate an optimized search query using LLM"""
-    try:
-        prompt = f"""
-        Given a job seeker's resume and preferences, create an optimized search query.
-        
-        Resume text: {search_context['resume_text']}
-        
-        Job preferences:
-        - Target roles: {', '.join(search_context['target_roles'])}
-        - Primary skills: {', '.join(search_context['primary_skills'])}
-        - Location: {search_context['location']}
-        - Job type: {search_context['job_type']}
-        - Additional preferences: {search_context['additional_preferences']}
-        
-        Create a concise, relevant search query that captures the essential requirements and preferences.
-        Focus on key skills, experience level, and job requirements that match the resume.
-        """
-        
-        response = await acompletion(
-            model="gpt-4o-mini",  
-            messages=[{
-                "role": "system",
-                "content": "You are a job search expert that creates optimized search queries."
-            }, {
-                "role": "user",
-                "content": prompt
-            }],
-            max_tokens=300
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        logger.error(f"Error generating optimized query: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate search query"
-        )
 
-async def search_pinecone_jobs(query: str, top_k: int = 10):
-    """Search for jobs in Pinecone using the optimized query"""
-    try:
-        # Using Pinecone's correct query format
-        results = pinecone_index.search(
-            namespace="job-list",
-            query={
-                "inputs": {"text": query},
-                "top_k": top_k
-            },
-            fields=["_id","_score"]  
-        )
-        
-        return results
-        
-    except Exception as e:
-        logger.error(f"Error querying Pinecone: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to search jobs in database"
-        )
-
-async def fetch_job_details_from_supabase(pinecone_results) -> List[dict]:
-    """Fetch full job details from Supabase using IDs from Pinecone results"""
-    try:
-        # Extract job IDs from Pinecone results, removing 'job_' prefix
-        job_ids = [
-            int(hit['_id'].replace('job_', '')) 
-            for hit in pinecone_results['result']['hits']
-        ]
-        
-        if not job_ids:
-            return []
-            
-        # Fetch full job details from Supabase
-        job_details = supabase.table("filtered_jobs")\
-            .select("*")\
-            .in_("id", job_ids)\
-            .execute()
-            
-        # Create a mapping of job_id to full details for preserving Pinecone's ranking order
-        job_map = {job['id']: job for job in job_details.data}
-        
-        # Return jobs in the same order as Pinecone results, including the similarity score
-        ordered_jobs = [
-            {
-                **job_map[int(hit['_id'].replace('job_', ''))],
-                'similarity_score': hit['_score']  # Include the similarity score from Pinecone
-            }
-            for hit in pinecone_results['result']['hits']
-            if int(hit['_id'].replace('job_', '')) in job_map
-        ]
-        
-        return ordered_jobs
-        
-    except Exception as e:
-        logger.error(f"Error fetching job details from Supabase: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch complete job details"
-        )
-
-async def analyze_job_fit_and_provide_tips(user_profile_text: str, job_details: dict) -> dict:
-    """
-    Analyzes the fit between a user's profile and a specific job, providing actionable insights.
-
-    Args:
-        user_profile_text: The concatenated text of the user's resume.
-        job_details: A dictionary containing details of a single job 
-                     (should include 'title', 'company', 'description', etc.).
-
-    Returns:
-        A dictionary containing the analysis results (missing skills, learning time, tips).
-        Returns an empty dict if analysis fails.
-    """
-    logger.info(f"Analyzing job fit for job ID {job_details.get('id', 'N/A')} and user...")
-    
-    # Default structure for results
-    analysis_results = {
-        "missing_skills": [], # Will be list of {"skill": "...", "learn_time_estimate": "..."}
-        "resume_suggestions": {
-            "highlight": [],
-            "consider_removing": []
-        }
-    }
-
-    try:
-        # --- Step 3: Construct Prompt and Call LLM ---
-        job_description = job_details.get('description', '')
-        job_title = job_details.get('title', 'this job')
-        
-        # Ensure we have necessary details to proceed
-        if not user_profile_text or not job_description:
-             logger.warning(f"Missing user profile or job description for job {job_details.get('id', 'N/A')}. Skipping analysis.")
-             return {} # Return empty if essential info is missing
-
-        prompt = f"""
-        Analyze the alignment between the provided User Profile (Resume) and the Job Description.
-        Identify skill gaps and provide resume tailoring suggestions.
-
-        **User Profile (Resume Text):**
-        ```
-        {user_profile_text} 
-        ```
-        **(Resume truncated to first 3000 chars if longer)**
-
-        **Job Description for "{job_title}":**
-        ```
-        {job_description[:4000]}
-        ```
-        **(Job Description truncated to first 4000 chars if longer)**
-
-        **Analysis Tasks:**
-
-        1.  **Identify Top 3 Missing Skills:** List the top 3 most important skills or qualifications mentioned in the Job Description that are NOT present in the User Profile. The user might have written that skill in abbreviation or in any other way in the resume. Look out carefully.
-        2.  **Estimate Learning Time for Each Missing Skill:** For EACH missing skill identified above, estimate the time needed for this specific user (considering their existing profile) to learn it sufficiently to complete a relevant project or earn a certification. 
-        State the estimate clearly (e.g., "2-4 weeks, 2 hours per day (project focus)", "1 month, 2 hours per day (certification focus)").
-        Also provide a short one liner of example projects or certifications that the user can do to learn the skill.
-            
-        3.  **Provide Resume Tailoring Suggestions:**
-            *   **Highlight:** List 2-3 specific skills or experiences ALREADY MENTIONED but NOT highlighted in the User Profile that are particularly relevant to this Job Description and should be emphasized. Do not include if they have emphasized it enough in the resume. If it is not well written, suggest how to write it better or say that it is not well written.
-            *   **Consider Removing:** List 1-2 items in the User Profile that seem LEAST relevant to this specific job and could potentially be removed to make space for more relevant points. Be cautious and phrase as suggestions.
-
-        **Output Format:**
-        Please provide the response ONLY as a valid JSON object with the following exact structure:
-        {{
-          "missing_skills": [
-            {{"skill": "Example Skill 1", "learn_time_estimate": "Example Time 1"}},
-            {{"skill": "Example Skill 2", "learn_time_estimate": "Example Time 2"}},
-            {{"skill": "Example Skill 3", "learn_time_estimate": "Example Time 3"}}
-          ],
-          "resume_suggestions": {{
-            "highlight": ["Example Highlight 1", "Example Highlight 2"],
-            "consider_removing": ["Example Removal Suggestion 1"]
-          }}
-        }}
-        Ensure the output is ONLY the JSON object, without any introductory text or explanations.
-        """
-
-        # Use the asynchronous version: acompletion
-        response = await acompletion(
-            model="gpt-4o-mini", 
-            messages=[{
-                "role": "system", 
-                "content": "You are a helpful career advisor AI analyzing job fit and providing actionable advice. Respond ONLY in the specified JSON format."
-             },{
-                 "role": "user", 
-                 "content": prompt
-            }],
-            response_format={ "type": "json_object" }, # Enforce JSON output if model supports it
-            max_tokens=500, # Adjust as needed
-            temperature=0.5 # Adjust for creativity vs consistency
-        )
-
-        # --- Parse the LLM response ---
-        try:
-            llm_output_text = response.choices[0].message.content.strip()
-            # Attempt to parse the JSON
-            parsed_output = json.loads(llm_output_text)
-            
-            # Basic validation (can be made more robust)
-            if isinstance(parsed_output, dict) and \
-               "missing_skills" in parsed_output and \
-               "resume_suggestions" in parsed_output:
-                analysis_results = parsed_output
-            else:
-                 logger.error(f"LLM output for job {job_details.get('id', 'N/A')} is not in expected JSON structure: {llm_output_text}")
-                 # Keep default empty results
-
-        except json.JSONDecodeError:
-            logger.error(f"Failed to decode LLM JSON output for job {job_details.get('id', 'N/A')}: {llm_output_text}")
-            # Keep default empty results
-        except Exception as parse_err:
-             logger.error(f"Error parsing LLM response for job {job_details.get('id', 'N/A')}: {str(parse_err)}")
-             # Keep default empty results
-
-    except Exception as e:
-        logger.error(f"Error during LLM call for job fit analysis (Job ID {job_details.get('id', 'N/A')}): {str(e)}")
-        # Return default empty structure on failure
-        return {} # Returning the default structure defined at the start
-
-    logger.info(f"Analysis complete for job ID {job_details.get('id', 'N/A')}")
-    return analysis_results
 
 @router.post("/search-pinecone")
 async def search_pinecone_endpoint(request: PineconeSearchRequest):
