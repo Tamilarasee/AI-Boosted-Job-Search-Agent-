@@ -1,78 +1,105 @@
 import streamlit as st
 import requests
 import uuid
-
-
+import time
 
 API_URL = "http://localhost:8000"
 
 # Function for the login form
 def login_form():
-    st.subheader("User Login")
-    with st.form(key='login_form'):
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        submit_button = st.form_submit_button("Login")
+    # --- Centering Column Wrapper ---
+    col1, col2, col3 = st.columns([1, 1.5, 1]) # Adjust ratios for desired width
+    with col2: # Place all content in the middle column
+        st.subheader("User Login")
+        with st.form(key='login_form'):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
 
-        if submit_button:
-            try:
-                response = requests.post(
-                    f"{API_URL}/auth/login",
-                    json={"email": email, "password": password}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    user_info = data.get("user") # Get the user object
-                    if user_info:
-                        st.session_state.auth_token = user_info.get("access_token") # Or however token is nested
-                        st.session_state.user_id = user_info.get("id") # Extract the user ID
-                        st.session_state.current_page = "job_preferences"
-                        # Ensure user_id was actually set before rerunning
-                        if st.session_state.user_id:
-                             st.rerun()
+            # --- Centering Submit Button ---
+            form_col1_inner, form_col2_inner, form_col3_inner = st.columns([1, 1.5, 1])
+            with form_col2_inner:
+                 submit_button = st.form_submit_button("Login", use_container_width=True)
+            # --- End Centering Submit Button ---
+
+            if submit_button:
+                try:
+                    response = requests.post(
+                        f"{API_URL}/auth/login",
+                        json={"email": email, "password": password}
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        user_info = data.get("user")
+                        if user_info:
+                            st.session_state.auth_token = user_info.get("access_token")
+                            st.session_state.user_id = user_info.get("id")
+                            st.session_state.current_page = "job_preferences"
+                            if st.session_state.user_id:
+                                 st.rerun()
+                            else:
+                                 st.error("Login succeeded but failed to retrieve user ID.")
                         else:
-                             st.error("Login succeeded but failed to retrieve user ID.")
+                            st.error("Login response did not contain user information.")
                     else:
-                        st.error("Login response did not contain user information.")
-                else:
-                    st.error("Login failed. Please check your credentials.")
-            except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
+                        st.error("Login failed. Please check your credentials.")
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
 
-    if st.button("Sign Up"):
-        st.session_state.current_page = "register"
+        # --- Centered Sign Up Link using Markdown (inside middle column) ---
+        st.write("") # Add some space
+        st.markdown(
+            "<div style='text-align: center;'>Don't have an account? <a href='?action=register' target='_self'>Sign Up</a></div>",
+            unsafe_allow_html=True
+        )
+        # --- End Sign Up Link ---
+    # --- End Centering Column Wrapper ---
+
 
 # Function for the registration form
 def registration_form():
-    st.subheader("Create a New Account")
-    new_email = st.text_input("Email")
-    new_password = st.text_input("New Password", type="password")
-    confirm_password = st.text_input("Confirm Password", type="password")
-    register_button = st.button("Sign Up")
+     # --- Centering Column Wrapper ---
+    col1, col2, col3 = st.columns([1, 1.5, 1]) # Adjust ratios for desired width
+    with col2: # Place all content in the middle column
+        st.subheader("Create a New Account")
+        new_email = st.text_input("Email")
+        new_password = st.text_input("New Password", type="password")
+        confirm_password = st.text_input("Confirm Password", type="password")
 
-    if register_button:
-        if new_password == confirm_password:
-            # Register user with Supabase using email
-            try:
-                response = requests.post(
-                    f"{API_URL}/auth/register",
-                    json={"email": new_email, "password": new_password}
-                )
-                if response.status_code == 200:
-                    st.success(f"Account created for: {new_email}")
-                    st.success("You can now log in with your new account!")
-                    st.session_state.current_page = "login"
-                    st.rerun()
-                else:
-                    st.error("Registration failed. Please try again.")
-            except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-        else:
-            st.error("Passwords do not match. Please try again.")
+        # --- Center the Sign Up Button ---
+        signup_btn_col1_inner, signup_btn_col2_inner, signup_btn_col3_inner = st.columns([1, 1.5, 1])
+        with signup_btn_col2_inner:
+             register_button = st.button("Sign Up", use_container_width=True)
+        # --- End Centering ---
 
-    # Button to go back to login
-    if st.button("Login"):
-        st.session_state.current_page = "login"
+        if register_button:
+            if new_password == confirm_password:
+                try:
+                    response = requests.post(
+                        f"{API_URL}/auth/register",
+                        json={"email": new_email, "password": new_password}
+                    )
+                    if response.status_code == 200:
+                        st.success(f"Account created for: {new_email}")
+                        st.success("Redirecting to login...")
+                        st.session_state.current_page = "login"
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error("Registration failed. Please try again.")
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+            else:
+                st.error("Passwords do not match. Please try again.")
+
+        # --- Centered Login Link using Markdown (inside middle column) ---
+        st.write("") # Add some space
+        st.markdown(
+            "<div style='text-align: center;'>Already have an account? <a href='?action=login' target='_self'>Login</a></div>",
+            unsafe_allow_html=True
+        )
+        # --- End Login Link ---
+    # --- End Centering Column Wrapper ---
+
 
 # def user_details_form():
 #     st.subheader("User Details")
@@ -243,7 +270,7 @@ def job_preferences_form():
 
     with col_btn2:
         # Submit button (original Search Jobs button)
-        if st.button("🔍 Search Jobs", type="primary", use_container_width=True):
+        if st.button("🔍 Search Jobs", use_container_width=True):
             # Get current user input from the widgets
             current_target_roles_str = target_roles
             current_primary_skills_str = primary_skills
@@ -324,24 +351,38 @@ def job_preferences_form():
                             if jobs:
                                 jobs = sorted(jobs, key=lambda x: x.get('date_posted', ''), reverse=True)
 
+                            # Display each job
                             for job in jobs:
+                                # Use container with border for visual separation
                                 with st.container(border=True):
-                                    col1_job, col2_job = st.columns([3, 1])
-                                    with col1_job:
+                                    col1, col2 = st.columns([3, 1]) # Reintroduce columns
+
+                                    with col1:
                                         st.subheader(f"{job.get('title', 'N/A')}")
                                         st.write(f"🏢 {job.get('company', 'N/A')} | 📍 {job.get('location', 'N/A')}")
                                         st.write(f"**Type:** {job.get('job_type', 'N/A')} | **Posted:** {job.get('date_posted', 'N/A')}")
+                                        # Use link_button for Apply Now
                                         if job.get('url'):
                                             st.link_button("Apply Now 🔗", job['url'], type="secondary")
-                                    with col2_job:
-                                        if 'match_percentage' in job:
-                                            st.metric("Resume Match", f"{job.get('match_percentage', 0):.1f}%")
-                                        else:
-                                            st.caption("Match N/A")
 
+                                    with col2:
+                                         # Display Resume Match Score if available
+                                         if 'match_percentage' in job:
+                                             st.metric(
+                                                 "Resume Match",
+                                                 f"{job.get('match_percentage', 0):.1f}%",
+                                                 delta=None,
+                                                 help="Based on semantic similarity between your profile and the job description."
+                                             )
+                                         else:
+                                             st.caption("Match N/A") # Placeholder if no score
+
+                                    # --- AI Analysis Section (now outside columns) ---
                                     analysis = job.get('analysis', {})
+                                    # Only show expander if analysis dict exists AND has content
                                     if analysis and (analysis.get('missing_skills') or analysis.get('resume_suggestions', {}).get('highlight') or analysis.get('resume_suggestions', {}).get('consider_removing')):
                                         with st.expander("🔍 Show AI Analysis & Tips", expanded=False):
+
                                             missing_skills = analysis.get('missing_skills', [])
                                             if missing_skills:
                                                 st.markdown("**Missing Skills & Learning Time:**")
@@ -353,16 +394,28 @@ def job_preferences_form():
                                             suggestions = analysis.get('resume_suggestions', {})
                                             highlights = suggestions.get('highlight', [])
                                             removals = suggestions.get('consider_removing', [])
+
                                             if highlights or removals:
                                                 st.markdown("**Resume Tailoring Suggestions:**")
                                                 if highlights:
                                                     st.markdown("*Consider Highlighting:*")
-                                                    for item in highlights: st.write(f"  - {item}")
+                                                    for item in highlights:
+                                                        st.write(f"  - {item}")
                                                 if removals:
                                                      st.markdown("*Consider Removing/De-emphasizing:*")
-                                                     for item in removals: st.write(f"  - {item}")
+                                                     for item in removals:
+                                                         st.write(f"  - {item}")
+                                                # Removed the redundant 'No specific tips' message here
+
+                                            # This case should now be covered by the outer 'if analysis and (...)' check
+                                            # if not missing_skills and not highlights and not removals:
+                                            #      st.write("_No specific skill gaps or resume tips were generated._")
+
                                     else:
+                                         # If 'analysis' dict is empty or missing meaningful content
                                          st.caption("_AI analysis not available or no specific insights generated for this job._")
+                                    # --- End AI Analysis Section ---
+
                         else:
                             st.error(f"Failed to fetch job results. Status code: {response.status_code}")
                             try: st.error(f"Error details: {response.json()}")
@@ -389,28 +442,33 @@ def career_insights_page():
 
     # --- Call Backend Endpoint ---
     api_endpoint = f"{API_URL}/api/insights/recent-skill-gaps/{user_id}"
-    
+
     try:
-        with st.spinner("Analyzing your recent activity..."):
-            response = requests.get(api_endpoint, timeout=60) # Increased timeout for LLM call
+        with st.spinner("🧠 Analyzing your recent activity and profile..."):
+            response = requests.get(api_endpoint, timeout=90)
 
         if response.status_code == 200:
             data = response.json()
             top_gaps = data.get("top_overall_gaps", [])
 
             if top_gaps:
-                st.markdown("#### Top 5 Skill Focus Areas (Based on Last 7 Days):")
-                
-                # Display using columns for better layout potentially
-                # Or just simple list for now
+                st.markdown("#### Top Skill Focus Areas (Based on Last 7 Days):")
+
                 for i, gap in enumerate(top_gaps):
                     skill = gap.get('skill', 'N/A')
+                    estimate = gap.get('learn_time_estimate', 'N/A')
                     reason = gap.get('reason', 'N/A')
+
                     with st.container(border=True):
-                         st.markdown(f"**{i+1}. {skill}**")
-                         st.caption(f"_{reason}_")
-                         # Optionally add links or resources here later
-                
+                         col_skill, col_time = st.columns([3, 1])
+                         with col_skill:
+                              st.markdown(f"**{i+1}. {skill}**")
+                         with col_time:
+                              st.markdown(f"<div style='text-align: right;'>⏳ Invest: {estimate}</div>", unsafe_allow_html=True)
+
+                         # Use st.write instead of st.caption for better readability
+                         st.write(reason)
+
                 st.info("💡 Consider focusing on projects or certifications in these areas to align better with your target roles.", icon="ℹ️")
 
             else:
