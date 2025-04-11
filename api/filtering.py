@@ -97,4 +97,4 @@ def filter_jobs(jobs, expanded_skills, min_skills_match=3):
     # If there are more matches we can filter by job type as well
 
     # Limit to top 100 matches
-    return filtered_jobs[:100], skillset
+    return filtered_jobs[:90], skillset

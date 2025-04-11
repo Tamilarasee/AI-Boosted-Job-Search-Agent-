@@ -107,7 +107,7 @@ async def fetch_and_filter_api_jobs(request: JobSearchRequest) -> List[Dict]:
     type_filter = job_type_mapping.get(request.job_type.lower() if request.job_type else "full-time", "FULL_TIME")
 
     querystring = {
-        "limit": "25", # Fetch a reasonable number
+        "limit": "100", # Fetch a reasonable number
         "offset": "0",
         "title_filter": title_filter,
         "location_filter": location_filter,
@@ -443,7 +443,7 @@ async def search_jobs_orchestrator(request: JobSearchRequest):
         loop = asyncio.get_running_loop()
         pinecone_results = await loop.run_in_executor(
             None, # Use default thread pool
-            lambda: search_pinecone_jobs(optimized_query, top_k=10) # Call the sync function
+            lambda: search_pinecone_jobs(optimized_query, top_k=50) # Call the sync function
         )
         # --- End wrapping ---
         
