@@ -142,32 +142,28 @@ def registration_form():
             unsafe_allow_html=True
         )
 
-def job_preferences_form():
-    st.subheader("Job Search Preferences & Profile")
+# --- NEW: Resume Management Page Function ---
+def resume_management_page():
+    st.subheader("📄 Resume Management")
 
     if 'user_id' not in st.session_state:
-        st.warning("Please log in to manage preferences and search for jobs.")
+        st.warning("Please log in to manage your resume.")
+        # Optionally add button to go to login
         return
 
     user_id = st.session_state.user_id
 
-    # --- Initialize State Variables ---
-    if 'resume_upload_success' not in st.session_state: st.session_state.resume_upload_success = False
-    if 'pref_text_area_value' not in st.session_state: st.session_state.pref_text_area_value = ""
-    # --- Add flag to track audio processing ---
-    if 'just_processed_audio' not in st.session_state: st.session_state.just_processed_audio = False
-    # --- End Initialize State Variables ---
+    # --- Resume Upload Section ---
+    st.markdown("**Upload or Update Your Resume**")
+    st.caption("Upload your latest resume (PDF). We'll analyze it to suggest relevant job titles and skills for your profile.")
 
-    st.markdown("---")
-    st.markdown("**Update Your Resume**")
-    st.caption("Upload your latest resume (PDF). We'll analyze it to suggest relevant titles and skills.")
-
-    if st.session_state.resume_upload_success:
+    # Display success message after rerun if applicable
+    if st.session_state.get('resume_upload_success', False): # Use .get for safety
         st.success("✅ Resume uploaded and analyzed successfully!")
-        st.session_state.resume_upload_success = False
+        st.session_state.resume_upload_success = False # Reset the flag
 
     uploaded_resumes = st.file_uploader(
-        "Upload Resumes (PDF)", type=["pdf"], accept_multiple_files=True, key="resume_uploader"
+        "Upload Resumes (PDF)", type=["pdf"], accept_multiple_files=True, key="resume_uploader_page" # Unique key
     )
 
     if st.button("🚀 Upload & Analyze Resume"):
@@ -179,13 +175,15 @@ def job_preferences_form():
                     response = requests.post(f"{API_URL}/api/users/upload-analyze-resume", files=files_for_upload, data=data_payload)
 
                     if response.status_code == 200:
-                        st.session_state.resume_upload_success = True
+                        st.session_state.resume_upload_success = True # Set flag for display after rerun
                         response_data = response.json()
+                        # Store suggestions in session state (used by job_preferences_form)
                         st.session_state.suggested_titles = response_data.get("suggested_titles", [])
                         st.session_state.extracted_skills = response_data.get("extracted_skills", [])
+                        # Provide feedback here as well
                         st.info(f"Suggested Titles: {', '.join(st.session_state.suggested_titles)}")
                         st.info(f"Extracted Skills: {', '.join(st.session_state.extracted_skills)}")
-                        st.rerun()
+                        st.rerun() # Rerun to show success message and clear uploader
                     else:
                         error_detail = response.json().get("detail", response.text)
                         st.error(f"⚠️ Failed to upload/analyze resume: {error_detail} (Status: {response.status_code})")
@@ -196,9 +194,34 @@ def job_preferences_form():
         else:
             st.warning("Please select at least one PDF resume file.")
 
+    # Display current suggested titles/skills if they exist
+    st.divider()
+    st.markdown("**Current Profile Suggestions**")
+    if st.session_state.get("suggested_titles") or st.session_state.get("extracted_skills"):
+         st.info(f"Suggested Titles: {', '.join(st.session_state.get('suggested_titles', []))}")
+         st.info(f"Extracted Skills: {', '.join(st.session_state.get('extracted_skills', []))}")
+    else:
+         st.caption("No suggestions yet. Upload a resume to generate them.")
+
+
+# --- End Resume Management Page Function ---
+
+def job_preferences_form():
+    st.subheader("Job Search Preferences & Profile")
+
+    if 'user_id' not in st.session_state:
+        st.warning("Please log in to manage preferences and search for jobs.")
+        return
+
+    user_id = st.session_state.user_id
+
+    # --- Initialize State Variables ---
+    if 'pref_text_area_value' not in st.session_state: st.session_state.pref_text_area_value = ""
+    if 'just_processed_audio' not in st.session_state: st.session_state.just_processed_audio = False
+
     st.markdown("---")
     st.markdown("**Define Your Job Search Criteria**")
-    st.caption("Use suggested titles/skills or add your own. Use voice input for additional preferences.")
+    st.caption("Suggestions are based on your latest analyzed resume (manageable via the 'Resume Management' page). Add specific roles or skills below to refine.")
 
     suggested_titles_list = st.session_state.get("suggested_titles", [])
     extracted_skills_list = st.session_state.get("extracted_skills", [])
@@ -272,79 +295,78 @@ def job_preferences_form():
     # --- End columns for inputs ---
     st.markdown("---")
 
-    col_btn1, col_btn2 = st.columns([1, 3])
+    # --- Action Buttons ---
+    # Removed the columns layout as only one button remains
+    # Removed Insights Button block
 
-    with col_btn1:
-        if st.button("📈 View Career Insights", use_container_width=True):
-             st.session_state.current_page = "career_insights"
-             st.rerun()
+    # Keep only the Search Jobs button
+    if st.button("🔍 Search Jobs", use_container_width=True): # Make full width
+        # Get current user input from the widgets
+        current_target_roles_str = target_roles
+        current_primary_skills_str = primary_skills
+        # Use the value from session state for additional preferences
+        current_additional_prefs = st.session_state.pref_text_area_value
 
-    with col_btn2:
-        if st.button("🔍 Search Jobs", use_container_width=True):
-            current_target_roles_str = target_roles
-            current_primary_skills_str = primary_skills
-            current_additional_prefs = st.session_state.pref_text_area_value
+        user_roles_list = [r.strip() for r in current_target_roles_str.split(",") if r.strip()]
+        final_roles_list = user_roles_list if user_roles_list else suggested_titles_list
+        if user_roles_list: st.info("Using user-provided target roles.")
+        elif final_roles_list: st.info("Using target roles extracted from resume.")
 
-            user_roles_list = [r.strip() for r in current_target_roles_str.split(",") if r.strip()]
-            final_roles_list = user_roles_list if user_roles_list else suggested_titles_list
-            if user_roles_list: st.info("Using user-provided target roles.")
-            elif final_roles_list: st.info("Using target roles extracted from resume.")
+        final_skills_set = set(extracted_skills_list)
+        user_skills_list = {s.strip() for s in current_primary_skills_str.split(",") if s.strip()}
+        final_skills_set.update(user_skills_list)
+        final_skills_list = list(final_skills_set)
 
-            final_skills_set = set(extracted_skills_list)
-            user_skills_list = {s.strip() for s in current_primary_skills_str.split(",") if s.strip()}
-            final_skills_set.update(user_skills_list)
-            final_skills_list = list(final_skills_set)
+        if final_roles_list or final_skills_list:
+             if not final_roles_list: st.warning("No target roles found. Search might be broad.")
+             if not final_skills_list: st.warning("No primary skills found. Search might be broad.")
 
-            if final_roles_list or final_skills_list:
-                 if not final_roles_list: st.warning("No target roles found. Search might be broad.")
-                 if not final_skills_list: st.warning("No primary skills found. Search might be broad.")
+             with st.spinner("Searching for matching jobs..."):
+                try:
+                    selected_job_type = job_type[0] if job_type else "Full-time"
+                    payload = {
+                        "user_id": user_id,
+                        "target_roles": final_roles_list,
+                        "primary_skills": final_skills_list,
+                        "preferred_location": preferred_location,
+                        "job_type": selected_job_type,
+                        "additional_preferences": current_additional_prefs
+                    }
 
-                 with st.spinner("Searching for matching jobs..."):
-                    try:
-                        selected_job_type = job_type[0] if job_type else "Full-time"
-                        payload = {
-                            "user_id": user_id,
-                            "target_roles": final_roles_list,
-                            "primary_skills": final_skills_list,
-                            "preferred_location": preferred_location,
-                            "job_type": selected_job_type,
-                            "additional_preferences": current_additional_prefs
-                        }
+                    response = requests.post(f"{API_URL}/api/search", json=payload)
 
-                        response = requests.post(f"{API_URL}/api/search", json=payload)
+                    if response.status_code == 200:
+                        results_data = response.json()
+                        overall_gaps = results_data.get("overall_skill_gaps", [])
+                        if overall_gaps:
+                            st.subheader("🎯 Top Focus Areas for You")
+                            st.markdown("Based on the jobs analyzed, here are the key skill areas to prioritize:")
+                            for item in overall_gaps:
+                                skill = item.get('skill', 'N/A')
+                                estimate = item.get('learn_time_estimate', 'N/A')
+                                st.write(f"- **{skill}:** _{estimate}_")
+                            st.divider()
 
-                        if response.status_code == 200:
-                            results_data = response.json()
-                            overall_gaps = results_data.get("overall_skill_gaps", [])
-                            if overall_gaps:
-                                st.subheader("🎯 Top Focus Areas for You")
-                                st.markdown("Based on the jobs analyzed, here are the key skill areas to prioritize:")
-                                for item in overall_gaps:
-                                    skill = item.get('skill', 'N/A')
-                                    estimate = item.get('learn_time_estimate', 'N/A')
-                                    st.write(f"- **{skill}:** _{estimate}_")
-                                st.divider()
+                        st.success(f"Found {results_data.get('filtered_jobs_count', 0)} matching jobs out of {results_data.get('total_jobs_found', 0)} total jobs analyzed")
 
-                            st.success(f"Found {results_data.get('filtered_jobs_count', 0)} matching jobs out of {results_data.get('total_jobs_found', 0)} total jobs analyzed")
+                        jobs = results_data.get('jobs', [])
+                        if jobs:
+                            jobs = sorted(jobs, key=lambda x: x.get('date_posted', ''), reverse=True)
 
-                            jobs = results_data.get('jobs', [])
-                            if jobs:
-                                jobs = sorted(jobs, key=lambda x: x.get('date_posted', ''), reverse=True)
-
-                            for job in jobs:
-                                with st.container(border=True):
-                                    col1_job, col2_job = st.columns([3, 1])
-                                    with col1_job:
-                                        st.subheader(f"{job.get('title', 'N/A')}")
-                                        st.write(f"🏢 {job.get('company', 'N/A')} | 📍 {job.get('location', 'N/A')}")
-                                        st.write(f"**Type:** {job.get('job_type', 'N/A')} | **Posted:** {job.get('date_posted', 'N/A')}")
-                                        if job.get('url'):
-                                            st.link_button("Apply Now 🔗", job['url'], type="secondary")
-                                    with col2_job:
-                                         if 'match_percentage' in job:
-                                             st.metric("Resume Match", f"{job.get('match_percentage', 0):.1f}%")
-                                         else:
-                                             st.caption("Match N/A")
+                        for job in jobs:
+                            with st.container(border=True):
+                                col1_job, col2_job = st.columns([3, 1])
+                                with col1_job:
+                                    st.subheader(f"{job.get('title', 'N/A')}")
+                                    st.write(f"🏢 {job.get('company', 'N/A')} | 📍 {job.get('location', 'N/A')}")
+                                    st.write(f"**Type:** {job.get('job_type', 'N/A')} | **Posted:** {job.get('date_posted', 'N/A')}")
+                                    if job.get('url'):
+                                        st.link_button("Apply Now 🔗", job['url'], type="secondary")
+                                with col2_job:
+                                    if 'match_percentage' in job:
+                                         st.metric("Resume Match", f"{job.get('match_percentage', 0):.1f}%")
+                                    else:
+                                         st.caption("Match N/A")
 
                                     analysis = job.get('analysis', {})
                                     if analysis and any(k in analysis for k in ['missing_skills', 'resume_suggestions']):
@@ -372,13 +394,17 @@ def job_preferences_form():
                                                      for item in removals:
                                                          st.write(f"  - {item}")
                                     else:
+                                        # This ensures consistent structure even if analysis is empty/not shown
                                          st.caption("_AI analysis not available or no specific insights generated._")
-                        else:
-                            st.error(f"Failed to fetch job results ({response.status_code}): {response.text}")
-                    except Exception as e:
-                        st.error(f"An error occurred during job search: {str(e)}")
-            else:
-                st.error("Could not determine target roles or skills. Please upload a resume or enter criteria.")
+                                    # --- End AI Analysis Section ---
+                    else:
+                        st.error(f"Failed to fetch job results ({response.status_code}): {response.text}")
+                except Exception as e:
+                    st.error(f"An error occurred during job search: {str(e)}")
+        else:
+            st.error("Could not determine target roles or skills. Please upload a resume or enter criteria.")
+
+    # --- End Action Buttons ---
 
 def career_insights_page():
     st.subheader("🚀 Career Insights Dashboard")
@@ -426,6 +452,8 @@ def career_insights_page():
          st.error(f"An unexpected error occurred fetching insights: {str(e)}")
 
     st.divider()
-    if st.button("⬅️ Back to Job Preferences"):
-        st.session_state.current_page = "job_preferences"
-        st.rerun()
+    # REMOVE the back button, sidebar handles navigation now
+    # if st.button("⬅️ Back to Job Preferences"):
+    #     st.session_state.current_page = "job_preferences"
+    #     st.rerun()
+# --- End career_insights_page ---
