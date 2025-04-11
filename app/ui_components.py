@@ -64,7 +64,7 @@ def translate_audio_bytes_to_english(audio_bytes: bytes) -> tuple[str | None, st
 def login_form():
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
-        st.subheader("User Login")
+        #st.markdown("<h3 style='text-align: center;'>Login</h3>", unsafe_allow_html=True)
         with st.form(key='login_form'):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
@@ -85,7 +85,8 @@ def login_form():
                         if user_info:
                             st.session_state.auth_token = user_info.get("access_token")
                             st.session_state.user_id = user_info.get("id")
-                            st.session_state.current_page = "job_preferences"
+                            st.session_state.user_email = user_info.get("email")
+                            st.session_state.current_page = "resume_management"
                             if st.session_state.user_id:
                                  st.rerun()
                             else:
@@ -107,7 +108,7 @@ def login_form():
 def registration_form():
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
-        st.subheader("Create a New Account")
+        st.markdown("<h3 style='text-align: center;'>Create a New Account</h3>", unsafe_allow_html=True)
         new_email = st.text_input("Email")
         new_password = st.text_input("New Password", type="password")
         confirm_password = st.text_input("Confirm Password", type="password")
@@ -144,7 +145,7 @@ def registration_form():
 
 # --- NEW: Resume Management Page Function ---
 def resume_management_page():
-    st.subheader("📄 Resume Management")
+    st.markdown("<h2 style='text-align: center;'>📄 Resume</h2>", unsafe_allow_html=True)
 
     if 'user_id' not in st.session_state:
         st.warning("Please log in to manage your resume.")
@@ -207,7 +208,7 @@ def resume_management_page():
 # --- End Resume Management Page Function ---
 
 def job_preferences_form():
-    st.subheader("Job Search Preferences & Profile")
+    st.markdown("<h2 style='text-align: center;'>🔍 Job Preferences </h2>", unsafe_allow_html=True)
 
     if 'user_id' not in st.session_state:
         st.warning("Please log in to manage preferences and search for jobs.")
@@ -221,7 +222,7 @@ def job_preferences_form():
 
     st.markdown("---")
     st.markdown("**Define Your Job Search Criteria**")
-    st.caption("Suggestions are based on your latest analyzed resume (manageable via the 'Resume Management' page). Add specific roles or skills below to refine.")
+    st.caption("Suggestions are based on your latest analyzed resume. Add specific roles or skills below to refine.")
 
     suggested_titles_list = st.session_state.get("suggested_titles", [])
     extracted_skills_list = st.session_state.get("extracted_skills", [])
@@ -237,177 +238,174 @@ def job_preferences_form():
         job_type = st.multiselect("Job Type", options=["Full-time", "Part-time", "Contract", "Internship"], default=["Full-time"])
 
     with col3:
-        # --- Additional Preferences Text Area ---
+        # --- Additional Preferences Text Area ONLY ---
         st.session_state.pref_text_area_value = st.text_area(
-            "Additional Preferences (Type or Use Voice)",
+            "Additional Preferences",
             value=st.session_state.pref_text_area_value,
-            height=110,
+            height=110, # Keep height adjustment
             key="pref_text_area_widget",
-            help="Other requirements (industry, company size). Use the recorder below."
+            help="Type any other requirements (industry, company size, etc.). You can also use voice input below (supports 58 languages)." # Adjusted help
         )
-
-        # --- Voice Input Section (Using st.audio_input) ---
-        st.markdown("###### Add Preferences via Voice (translates to English):")
-
-        audio_data = st.audio_input(
-            "Click the microphone to start/stop recording", # Updated label
-            key="audio_input_widget" # Assign a key to potentially help with state
-        )
-
-        # --- Process Audio Data ONLY if it's new ---
-        # Check if audio_data exists AND we haven't just processed audio in the previous run
-        if audio_data is not None and not st.session_state.just_processed_audio:
-             wav_bytes = audio_data.getvalue()
-             print(f"Received {len(wav_bytes)} bytes from st.audio_input (Processing).")
-
-             if wav_bytes:
-                 with st.spinner("Translating your recording..."):
-                      translated_text, error_message = translate_audio_bytes_to_english(wav_bytes)
-
-                 if translated_text:
-                     st.success("✅ Voice input translated and added below.")
-                     current_text = st.session_state.pref_text_area_value
-                     separator = " " if current_text else ""
-                     st.session_state.pref_text_area_value += separator + translated_text
-                     # --- Set the flag BEFORE rerunning ---
-                     st.session_state.just_processed_audio = True
-                     # Trigger rerun to update text area and clear audio widget state implicitly
-                     st.rerun()
-                 else:
-                     st.error(f"⚠️ Translation failed: {error_message}")
-                     # Optional: Set flag even on error if you want to prevent immediate reprocessing
-                     # st.session_state.just_processed_audio = True
-                     # st.rerun()
-             else:
-                 st.warning("Audio input received but contained no data.")
-
-        # --- Reset the flag if audio_data is None (meaning widget is cleared or not used) ---
-        elif audio_data is None:
-             st.session_state.just_processed_audio = False
-
-        # --- If audio_data is present BUT the flag is True, just reset the flag ---
-        # This happens on the rerun immediately after successful processing
-        elif audio_data is not None and st.session_state.just_processed_audio:
-             print("Resetting audio processed flag (skipping processing stale audio data).")
-             st.session_state.just_processed_audio = False
-
 
     # --- End columns for inputs ---
     st.markdown("---")
 
-    # --- Action Buttons ---
-    # Removed the columns layout as only one button remains
-    # Removed Insights Button block
+    # --- Voice Input and Search Button Side-by-Side (Equal Columns) ---
+    voice_col, search_col = st.columns(2) # Use 2 equal columns
 
-    # Keep only the Search Jobs button
-    if st.button("🔍 Search Jobs", use_container_width=True): # Make full width
-        # Get current user input from the widgets
-        current_target_roles_str = target_roles
-        current_primary_skills_str = primary_skills
-        # Use the value from session state for additional preferences
-        current_additional_prefs = st.session_state.pref_text_area_value
+    with voice_col: # Microphone now in the first column
+        # This is the SINGLE microphone input now
+        audio_data = st.audio_input(
+            label=" ", # Keep label collapsed
+            label_visibility="collapsed",
+            key="audio_input_widget_side", # Ensure this key is unique if needed
+            help="Click the mic to record preferences (translates 58 languages to English). Click again to stop."
+        )
 
-        user_roles_list = [r.strip() for r in current_target_roles_str.split(",") if r.strip()]
-        final_roles_list = user_roles_list if user_roles_list else suggested_titles_list
-        if user_roles_list: st.info("Using user-provided target roles.")
-        elif final_roles_list: st.info("Using target roles extracted from resume.")
+    with search_col: # Search button now in the second column
+        # --- Add vertical space ABOVE the button ---
+        # Adjust the number of <br> or use margin-top in px for finer control
+        st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True) # Reduced space
+        # OR use margin-top: st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
 
-        final_skills_set = set(extracted_skills_list)
-        user_skills_list = {s.strip() for s in current_primary_skills_str.split(",") if s.strip()}
-        final_skills_set.update(user_skills_list)
-        final_skills_list = list(final_skills_set)
+        # Render the button
+        search_button_clicked = st.button("🔍 Search Jobs", use_container_width=True)
 
-        if final_roles_list or final_skills_list:
-             if not final_roles_list: st.warning("No target roles found. Search might be broad.")
-             if not final_skills_list: st.warning("No primary skills found. Search might be broad.")
 
-             with st.spinner("Searching for matching jobs..."):
-                try:
-                    selected_job_type = job_type[0] if job_type else "Full-time"
-                    payload = {
-                        "user_id": user_id,
-                        "target_roles": final_roles_list,
-                        "primary_skills": final_skills_list,
-                        "preferred_location": preferred_location,
-                        "job_type": selected_job_type,
-                        "additional_preferences": current_additional_prefs
-                    }
-
-                    response = requests.post(f"{API_URL}/api/search", json=payload)
-
-                    if response.status_code == 200:
-                        results_data = response.json()
-                        overall_gaps = results_data.get("overall_skill_gaps", [])
-                        if overall_gaps:
-                            st.subheader("🎯 Top Focus Areas for You")
-                            st.markdown("Based on the jobs analyzed, here are the key skill areas to prioritize:")
-                            for item in overall_gaps:
-                                skill = item.get('skill', 'N/A')
-                                estimate = item.get('learn_time_estimate', 'N/A')
-                                st.write(f"- **{skill}:** _{estimate}_")
-                            st.divider()
-
-                        st.success(f"Found {results_data.get('filtered_jobs_count', 0)} matching jobs out of {results_data.get('total_jobs_found', 0)} total jobs analyzed")
-
-                        jobs = results_data.get('jobs', [])
-                        if jobs:
-                            jobs = sorted(jobs, key=lambda x: x.get('date_posted', ''), reverse=True)
-
-                        for job in jobs:
-                            with st.container(border=True):
-                                col1_job, col2_job = st.columns([3, 1])
-                                with col1_job:
-                                    st.subheader(f"{job.get('title', 'N/A')}")
-                                    st.write(f"🏢 {job.get('company', 'N/A')} | 📍 {job.get('location', 'N/A')}")
-                                    st.write(f"**Type:** {job.get('job_type', 'N/A')} | **Posted:** {job.get('date_posted', 'N/A')}")
-                                    if job.get('url'):
-                                        st.link_button("Apply Now 🔗", job['url'], type="secondary")
-                                with col2_job:
-                                    if 'match_percentage' in job:
-                                         st.metric("Resume Match", f"{job.get('match_percentage', 0):.1f}%")
-                                    else:
-                                         st.caption("Match N/A")
-
-                                    analysis = job.get('analysis', {})
-                                    if analysis and any(k in analysis for k in ['missing_skills', 'resume_suggestions']):
-                                        with st.expander("🔍 Show AI Analysis & Tips", expanded=False):
-                                            missing_skills = analysis.get('missing_skills', [])
-                                            if missing_skills:
-                                                st.markdown("**Missing Skills & Learning Time:**")
-                                                for item in missing_skills:
-                                                    skill = item.get('skill', 'N/A')
-                                                    estimate = item.get('learn_time_estimate', 'N/A')
-                                                    st.write(f"- **{skill}:** _{estimate}_")
-
-                                            suggestions = analysis.get('resume_suggestions', {})
-                                            highlights = suggestions.get('highlight', [])
-                                            removals = suggestions.get('consider_removing', [])
-
-                                            if highlights or removals:
-                                                st.markdown("**Resume Tailoring Suggestions:**")
-                                                if highlights:
-                                                    st.markdown("*Consider Highlighting:*")
-                                                    for item in highlights:
-                                                        st.write(f"  - {item}")
-                                                if removals:
-                                                     st.markdown("*Consider Removing/De-emphasizing:*")
-                                                     for item in removals:
-                                                         st.write(f"  - {item}")
-                                    else:
-                                        # This ensures consistent structure even if analysis is empty/not shown
-                                         st.caption("_AI analysis not available or no specific insights generated._")
-                                    # --- End AI Analysis Section ---
-                    else:
-                        st.error(f"Failed to fetch job results ({response.status_code}): {response.text}")
-                except Exception as e:
-                    st.error(f"An error occurred during job search: {str(e)}")
+    # --- Process Audio Data (Logic remains the same, location unchanged) ---
+    if audio_data is not None and not st.session_state.just_processed_audio:
+        wav_bytes = audio_data.getvalue()
+        print(f"Received {len(wav_bytes)} bytes from st.audio_input (Processing).")
+        if wav_bytes:
+            with st.spinner("Translating your recording..."):
+                translated_text, error_message = translate_audio_bytes_to_english(wav_bytes)
+            if translated_text:
+                st.success("✅ Voice input translated and added to 'Additional Preferences'.")
+                current_text = st.session_state.pref_text_area_value
+                separator = " " if current_text else ""
+                st.session_state.pref_text_area_value += separator + translated_text
+                st.session_state.just_processed_audio = True
+                st.rerun() # Rerun to update text area and clear audio widget
+            else:
+                st.error(f"⚠️ Translation failed: {error_message}")
         else:
-            st.error("Could not determine target roles or skills. Please upload a resume or enter criteria.")
+            st.warning("Audio input received but contained no data.")
+    elif audio_data is None:
+        st.session_state.just_processed_audio = False
+    elif audio_data is not None and st.session_state.just_processed_audio:
+        print("Resetting audio processed flag (skipping processing stale audio data).")
+        st.session_state.just_processed_audio = False
+    # --- End Audio Processing ---
+
+
+    # --- Search Logic (Triggered by the stored button state) ---
+    if search_button_clicked:
+            # Get current user input from the widgets
+            current_target_roles_str = target_roles
+            current_primary_skills_str = primary_skills
+            current_additional_prefs = st.session_state.pref_text_area_value # Use state value
+
+            user_roles_list = [r.strip() for r in current_target_roles_str.split(",") if r.strip()]
+            final_roles_list = user_roles_list if user_roles_list else suggested_titles_list
+            if user_roles_list: st.info("Using user-provided target roles.")
+            elif final_roles_list: st.info("Using target roles extracted from resume.")
+
+            final_skills_set = set(extracted_skills_list)
+            user_skills_list = {s.strip() for s in current_primary_skills_str.split(",") if s.strip()}
+            final_skills_set.update(user_skills_list)
+            final_skills_list = list(final_skills_set)
+
+            if final_roles_list or final_skills_list:
+                 if not final_roles_list: st.warning("No target roles found. Search might be broad.")
+                 if not final_skills_list: st.warning("No primary skills found. Search might be broad.")
+
+                 with st.spinner("Searching for matching jobs..."):
+                    try:
+                        selected_job_type = job_type[0] if job_type else "Full-time"
+                        payload = {
+                            "user_id": user_id,
+                            "target_roles": final_roles_list,
+                            "primary_skills": final_skills_list,
+                            "preferred_location": preferred_location,
+                            "job_type": selected_job_type,
+                            "additional_preferences": current_additional_prefs
+                        }
+
+                        response = requests.post(f"{API_URL}/api/search", json=payload)
+
+                        if response.status_code == 200:
+                            results_data = response.json()
+                            overall_gaps = results_data.get("overall_skill_gaps", [])
+                            if overall_gaps:
+                                st.subheader("🎯 Top Focus Areas for You")
+                                st.markdown("Based on the jobs analyzed, here are the key skill areas to prioritize:")
+                                for item in overall_gaps:
+                                    skill = item.get('skill', 'N/A')
+                                    estimate = item.get('learn_time_estimate', 'N/A')
+                                    st.write(f"- **{skill}:** _{estimate}_")
+                                st.divider()
+
+                            st.success(f"Found {results_data.get('filtered_jobs_count', 0)} matching jobs out of {results_data.get('total_jobs_found', 0)} total jobs analyzed")
+
+                            jobs = results_data.get('jobs', [])
+                            if jobs:
+                                jobs = sorted(jobs, key=lambda x: x.get('date_posted', ''), reverse=True)
+
+                            for job in jobs:
+                                with st.container(border=True):
+                                    col1_job, col2_job = st.columns([3, 1])
+                                    with col1_job:
+                                        st.subheader(f"{job.get('title', 'N/A')}")
+                                        st.write(f"🏢 {job.get('company', 'N/A')} | 📍 {job.get('location', 'N/A')}")
+                                        st.write(f"**Type:** {job.get('job_type', 'N/A')} | **Posted:** {job.get('date_posted', 'N/A')}")
+                                        if job.get('url'):
+                                            st.link_button("Apply Now 🔗", job['url'], type="secondary")
+                                    with col2_job:
+                                        if 'match_percentage' in job:
+                                             st.metric("Resume Match", f"{job.get('match_percentage', 0):.1f}%")
+                                        else:
+                                             st.caption("Match N/A")
+
+                                        analysis = job.get('analysis', {})
+                                        if analysis and any(k in analysis for k in ['missing_skills', 'resume_suggestions']):
+                                            with st.expander("🔍 Show AI Analysis & Tips", expanded=False):
+                                                missing_skills = analysis.get('missing_skills', [])
+                                                if missing_skills:
+                                                    st.markdown("**Missing Skills & Learning Time:**")
+                                                    for item in missing_skills:
+                                                        skill = item.get('skill', 'N/A')
+                                                        estimate = item.get('learn_time_estimate', 'N/A')
+                                                        st.write(f"- **{skill}:** _{estimate}_")
+
+                                                suggestions = analysis.get('resume_suggestions', {})
+                                                highlights = suggestions.get('highlight', [])
+                                                removals = suggestions.get('consider_removing', [])
+
+                                                if highlights or removals:
+                                                    st.markdown("**Resume Tailoring Suggestions:**")
+                                                    if highlights:
+                                                        st.markdown("*Consider Highlighting:*")
+                                                        for item in highlights:
+                                                            st.write(f"  - {item}")
+                                                    if removals:
+                                                         st.markdown("*Consider Removing/De-emphasizing:*")
+                                                         for item in removals:
+                                                             st.write(f"  - {item}")
+                                        else:
+                                            # This ensures consistent structure even if analysis is empty/not shown
+                                             st.caption("_AI analysis not available or no specific insights generated._")
+                                        # --- End AI Analysis Section ---
+                        else:
+                            st.error(f"Failed to fetch job results ({response.status_code}): {response.text}")
+                    except Exception as e:
+                        st.error(f"An error occurred during job search: {str(e)}")
+            else:
+                st.error("Could not determine target roles or skills. Please upload a resume or enter criteria.")
 
     # --- End Action Buttons ---
 
 def career_insights_page():
-    st.subheader("🚀 Career Insights Dashboard")
+    st.markdown("<h2 style='text-align: center;'>📈 Career Insights Dashboard</h2>", unsafe_allow_html=True)
     st.markdown("Analyzing your recent job searches to identify key skill areas for development.")
 
     if 'user_id' not in st.session_state:

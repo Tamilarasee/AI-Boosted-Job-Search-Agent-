@@ -7,8 +7,8 @@ import os # Import os if not already
 # --- Load Environment Variables ---
 load_dotenv() # Make sure this runs early
 
-# Set page config as the first Streamlit command
-st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
+# Set page config - initial state auto
+st.set_page_config(layout="wide", initial_sidebar_state="auto")
 
 # --- THIS NAVIGATION HANDLING BLOCK MUST BE HERE ---
 query_params = st.query_params
@@ -58,7 +58,7 @@ def main():
             st.session_state[key] = default_value
     # --- END SESSION STATE INITIALIZATION ---
 
-    app_title = "AI-Boosted Job Search Agent"
+    # No global title here anymore
 
     # --- AUTHENTICATED VIEW (with Sidebar) ---
     if st.session_state.user_id:
@@ -68,18 +68,22 @@ def main():
 
         # --- Sidebar Navigation ---
         with st.sidebar:
-            st.header("Navigation")
-            # Determine button type based on current page
+            # Add Sidebar Title
+            st.title("AI-Boosted Job Search Agent") # Use st.title for sidebar main heading
+            # Removed Navigation Header
+
+            # Determine button types
             resume_type = "primary" if st.session_state.current_page == "resume_management" else "secondary"
             profile_type = "primary" if st.session_state.current_page == "job_preferences" else "secondary"
             insights_type = "primary" if st.session_state.current_page == "career_insights" else "secondary"
 
-            if st.button("📄 Resume Management", use_container_width=True, type=resume_type):
+            # Updated Button Labels
+            if st.button("📄 Upload Resume", use_container_width=True, type=resume_type):
                 if st.session_state.current_page != "resume_management":
                     st.session_state.current_page = "resume_management"
                     st.rerun()
 
-            if st.button("👤 Profile & Search", use_container_width=True, type=profile_type):
+            if st.button("🔍 Search Jobs", use_container_width=True, type=profile_type):
                 if st.session_state.current_page != "job_preferences":
                     st.session_state.current_page = "job_preferences"
                     st.rerun()
@@ -89,8 +93,13 @@ def main():
                     st.session_state.current_page = "career_insights"
                     st.rerun()
 
+            # --- Spacer to push logout down ---
+            st.markdown("<br>" * 10, unsafe_allow_html=True) # Adjust multiplier for spacing
+            # --- End Spacer ---
+
+            # --- Logout Section (Moved to Bottom) ---
             st.divider()
-            st.header(f"User: {st.session_state.get('user_email', '...')}") # Display user email if stored
+            
             if st.button("🚪 Logout", use_container_width=True):
                 # Clear all session state keys on logout
                 keys_to_clear = list(st.session_state.keys()) # Get keys before iterating
@@ -107,7 +116,6 @@ def main():
 
         # --- Main Page Area (Authenticated) ---
         # Use smaller header for authenticated pages
-        st.markdown(f"<h3 style='text-align: center;'>{app_title}</h3>", unsafe_allow_html=True)
         if st.session_state.current_page in pages:
             pages[st.session_state.current_page]()
         else:
@@ -118,18 +126,21 @@ def main():
 
     # --- UNAUTHENTICATED VIEW (Login/Register) ---
     else:
-        # Reset to login/register if somehow in another state while logged out
+        # Use the original large title for login/register
+        app_title = "AI-Boosted Job Search Agent"
+        st.markdown(f"<h1 style='text-align: center;'>{app_title}</h1>", unsafe_allow_html=True)
+        # --- Add vertical space ---
+        st.markdown("<br>", unsafe_allow_html=True) # Add a line break for spacing
+        # --- End Add ---
+
+        # Reset to login/register if needed
         if st.session_state.current_page not in ["login", "register"]:
              st.session_state.current_page = "login"
 
-        # Use larger header (h1) for login/register
-        st.markdown(f"<h1 style='text-align: center;'>{app_title}</h1>", unsafe_allow_html=True)
-
-        # Display only login or registration form
+        # Display login or register form
         if st.session_state.current_page == "register":
             pages["register"]()
         else:
-            # Default to login form
             pages["login"]()
 
 
