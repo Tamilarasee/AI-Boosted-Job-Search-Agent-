@@ -41,7 +41,11 @@ print("--- FastAPI app instance created ---", file=sys.stderr)
 
 
 # Add CORS middleware (ensure origins allow testing or your future Streamlit URL)
-origins = ["*"] # Adjust as needed later
+origins = [
+    "https://ai-boosted-job-search-agent.streamlit.app/", # The deployed Streamlit app URL
+    "http://localhost:8501",              # Keep for local Streamlit testing
+    # Add any other specific origins if needed
+]
 
 app.add_middleware(
     CORSMiddleware,
