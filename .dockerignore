@@ -1,0 +1,43 @@
+    # Git files
+    .git
+    .gitignore
+
+    # Python cache and virtual environment
+    __pycache__/
+    *.pyc
+    *.pyo
+    *.pyd
+    .Python
+    env/
+    venv/
+    .venv/
+
+    # IDE and OS files
+    .idea/
+    .vscode/
+    *.suo
+    *.ntvs*
+    *.njsproj
+    *.sln
+    *.sw?
+    .DS_Store
+
+    # Secrets
+    .env
+
+    # Build artifacts
+    dist/
+    build/
+    *.egg-info/
+
+    # Test files (optional, if you don't need them in the image)
+    # tests/
+    # *.test.py
+
+    # Dockerfiles (they are used *to* build, not needed *inside*)
+    Dockerfile
+    *.Dockerfile
+    .dockerignore
+
+    # Other artifacts
+    *.log

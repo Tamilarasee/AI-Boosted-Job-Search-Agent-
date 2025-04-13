@@ -13,7 +13,7 @@ load_dotenv()
 # This will automatically use the OPENAI_API_KEY environment variable
 client = OpenAI()
 
-API_URL = "http://localhost:8000"
+API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
 
 # --- NEW: Helper Function for OpenAI Translation ---
 def translate_audio_bytes_to_english(audio_bytes: bytes) -> tuple[str | None, str | None]:
