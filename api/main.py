@@ -12,8 +12,20 @@ from io import BytesIO
 from api.skill_insights import router as insights_router
 import asyncio
 import logging
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+# Add this middleware
+origins = ["*"] # TEMPORARY - Allow all origins
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # Allows all methods
+    allow_headers=["*"], # Allows all headers
+)
 
 # Configure logger for this endpoint
 logger = logging.getLogger("resume_upload_analyze")
