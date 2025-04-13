@@ -37,4 +37,4 @@
     # Run uvicorn when the container launches
     # Use 0.0.0.0 to allow connections from outside the container
     # The port is dynamically set by Render via the $PORT env var
-    CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]
+    CMD ["python", "main.py"]
