@@ -29,6 +29,5 @@ WORKDIR /code/api
 EXPOSE 8000
 ENV PORT 8000 # Render will use this environment variable
 
-# Run uvicorn server using the $PORT variable from Render
-# Specify the app location relative to the WORKDIR /code/api
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]
+# Shell form (DOES expand $PORT)
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT
