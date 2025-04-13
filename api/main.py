@@ -1,34 +1,61 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile,Form
-from pydantic import BaseModel
-from typing import Optional, List
-from utils.supabase.db import supabase
-import traceback
-from api.resume_extraction import extract_pdf_text, extract_titles_and_skills
-from api.search_rapidapi import router as search_router
-from io import BytesIO
-#from api.search_google_api import router as google_search_router
-#from archived.pinecone_sync import router as pinecone_router
-#from archived.pinecone_search import router as pinecone_search_router
-from api.skill_insights import router as insights_router
-import asyncio
-import logging
-from fastapi.middleware.cors import CORSMiddleware
+import sys # Add sys import
+print("--- Starting api/main.py ---", file=sys.stderr) # Print to stderr
 
+try:
+    from fastapi import FastAPI, HTTPException, File, UploadFile, Form
+    from pydantic import BaseModel
+    from typing import Optional, List
+    print("--- Imported FastAPI/Pydantic ---", file=sys.stderr)
+
+    # Print before the crucial import
+    print("--- Importing Supabase client ---", file=sys.stderr)
+    from utils.supabase.db import supabase
+    print("--- Supabase client imported successfully ---", file=sys.stderr)
+
+    import traceback
+    from api.resume_extraction import extract_pdf_text, extract_titles_and_skills
+    from api.search_rapidapi import router as search_router
+    from io import BytesIO
+    #from api.search_google_api import router as google_search_router
+    #from archived.pinecone_sync import router as pinecone_router
+    #from archived.pinecone_search import router as pinecone_search_router
+    from api.skill_insights import router as insights_router
+    import asyncio
+    import logging
+    print("--- Imported other modules ---", file=sys.stderr)
+
+    # CORS Middleware (ensure it's here if you added it)
+    from fastapi.middleware.cors import CORSMiddleware
+    print("--- Imported CORS ---", file=sys.stderr)
+
+except Exception as import_err:
+    print(f"---!!! IMPORT ERROR: {import_err} !!!---", file=sys.stderr)
+    # Optionally print full traceback
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    raise # Re-raise the exception to ensure the app stops
+
+print("--- Creating FastAPI app instance ---", file=sys.stderr)
 app = FastAPI()
+print("--- FastAPI app instance created ---", file=sys.stderr)
 
-# Add this middleware
-origins = ["*"] # TEMPORARY - Allow all origins
+
+# Add CORS middleware (ensure origins allow testing or your future Streamlit URL)
+origins = ["*"] # Adjust as needed later
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"], # Allows all methods
-    allow_headers=["*"], # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+print("--- CORS Middleware added ---", file=sys.stderr)
 
-# Configure logger for this endpoint
-logger = logging.getLogger("resume_upload_analyze")
+# Configure logger for this endpoint (might move later)
+logger = logging.getLogger("api_main") # Give it a distinct name
+logging.basicConfig(level=logging.INFO, stream=sys.stderr, format='%(levelname)s:%(name)s:%(message)s')
+print("--- Logger configured ---", file=sys.stderr)
 
 # Pydantic models for request validation
 class UserLogin(BaseModel):
