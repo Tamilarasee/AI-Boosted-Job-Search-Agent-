@@ -273,28 +273,48 @@ def job_preferences_form():
 
 
     # --- Process Audio Data (Logic remains the same, location unchanged) ---
-    if audio_data is not None and not st.session_state.just_processed_audio:
-        wav_bytes = audio_data.getvalue()
-        print(f"Received {len(wav_bytes)} bytes from st.audio_input (Processing).")
-        if wav_bytes:
-            with st.spinner("Translating your recording..."):
-                translated_text, error_message = translate_audio_bytes_to_english(wav_bytes)
-            if translated_text:
-                st.success("✅ Voice input translated and added to 'Additional Preferences'.")
-                current_text = st.session_state.pref_text_area_value
-                separator = " " if current_text else ""
-                st.session_state.pref_text_area_value += separator + translated_text
-                st.session_state.just_processed_audio = True
-                st.rerun() # Rerun to update text area and clear audio widget
+    if audio_data is not None:
+        # Check if this is NEW audio data we haven't processed yet
+        # Use .get with a default for safety when checking the flag
+        if not st.session_state.get('just_processed_audio', False):
+            wav_bytes = audio_data.getvalue()
+            print(f"Received NEW {len(wav_bytes)} bytes from st.audio_input (Processing).")
+            if wav_bytes:
+                with st.spinner("Translating your recording..."):
+                    translated_text, error_message = translate_audio_bytes_to_english(wav_bytes)
+                if translated_text:
+                    st.success("✅ Voice input translated and added to 'Additional Preferences'.")
+                    # Use .get with default for safety when reading text area value
+                    current_text = st.session_state.get('pref_text_area_value', "")
+                    separator = " " if current_text else ""
+                    # Update the state variable that the text_area widget uses
+                    st.session_state.pref_text_area_value = current_text + separator + translated_text
+                    # Set flag indicating we just processed audio data associated with the current widget state
+                    st.session_state.just_processed_audio = True
+                    st.rerun() # Rerun to update the text area display IMMEDIATELY
+                else:
+                    st.error(f"⚠️ Translation failed: {error_message}")
+                    # Optional: Reset flag on failure if needed, but maybe not
+                    # st.session_state.just_processed_audio = False
             else:
-                st.error(f"⚠️ Translation failed: {error_message}")
+                st.warning("Audio input received but contained no data.")
+                # Optional: Reset flag on empty data if needed
+                # st.session_state.just_processed_audio = False
         else:
-            st.warning("Audio input received but contained no data.")
+            # This 'audio_data' is not None, but the 'just_processed_audio' flag is True.
+            # This means it's the same audio data present in the widget after the post-translation rerun.
+            # We should ignore it and NOT reset the flag here. The flag signifies that the
+            # current non-None audio_data in the widget corresponds to what's already processed.
+            print("Ignoring stale audio data present in widget after rerun.")
+            pass # Explicitly do nothing with the audio or the flag
+
     elif audio_data is None:
-        st.session_state.just_processed_audio = False
-    elif audio_data is not None and st.session_state.just_processed_audio:
-        print("Resetting audio processed flag (skipping processing stale audio data).")
-        st.session_state.just_processed_audio = False
+        # Audio widget is empty (cleared by user or never used).
+        # If the flag was previously True, it means the user just cleared the input
+        # that we had processed, so we should reset the flag.
+        if st.session_state.get('just_processed_audio', False):
+             print("Audio input cleared, resetting processed flag.")
+             st.session_state.just_processed_audio = False # Reset the flag
     # --- End Audio Processing ---
 
 
