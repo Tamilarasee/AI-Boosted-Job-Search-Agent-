@@ -25,6 +25,9 @@ COPY ./utils/ /code/utils/
 # Set the final working directory for running the app
 WORKDIR /code/api
 
+# Tell Python to also look for modules in the /code directory
+ENV PYTHONPATH="/code"
+
 # Expose the port the app runs on
 EXPOSE 8000
 ENV PORT 8000 # Render will use this environment variable
