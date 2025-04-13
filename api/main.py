@@ -46,15 +46,60 @@ async def login(user: UserLogin):
 @app.post("/auth/register")
 async def register(user: UserLogin):
     try:
-        response = supabase.auth.sign_up({
+        # 1. Sign up the user in Supabase Auth
+        auth_response = supabase.auth.sign_up({
             "email": user.email,
             "password": user.password
         })
-        if response.user:
-            return {"success": True, "user": response.user}
-        raise HTTPException(status_code=400, detail="Registration failed")
+
+        print("\n\nauth_response: ", auth_response)
+
+        # Check if sign-up was successful and we got a user object
+        if auth_response.user:
+            new_user_id = auth_response.user.id
+            new_user_email = auth_response.user.email # Or get from input 'user.email'
+
+            # 2. --- NEW: Insert a corresponding record into the 'users' table ---
+            try:
+                loop = asyncio.get_running_loop()
+                insert_result = await loop.run_in_executor(
+                    None,
+                    lambda: supabase.table("users")
+                               .insert({
+                                   "user_id": new_user_id, # The primary key linking to auth.users
+                                   "email": new_user_email,
+                                   # Add other default fields if your 'users' table requires them
+                                   # e.g., "created_at": datetime.utcnow().isoformat()
+                               })
+                               .execute()
+                )
+
+                # Check if insert failed
+                if hasattr(insert_result, 'error') and insert_result.error:
+                    # Log the error, maybe delete the auth user? (Or handle depending on desired consistency)
+                    logger.error(f"Failed to insert user record into DB after signup for {new_user_email}: {insert_result.error}")
+                    # Depending on policy, you might want to raise an exception here
+                    # or try to delete the auth user to keep things consistent.
+                    # For now, we'll proceed but log the error.
+                    # raise HTTPException(status_code=500, detail="Failed to create user profile.")
+
+                logger.info(f"Successfully created auth user and DB record for {new_user_email} (ID: {new_user_id})")
+
+            except Exception as db_insert_err:
+                 logger.error(f"Error inserting user record into DB for {new_user_email}: {db_insert_err}")
+                 # Handle error as needed, maybe raise HTTP 500
+                 # raise HTTPException(status_code=500, detail="Failed to initialize user profile.")
+
+            # Return the original auth response user object as before
+            return {"success": True, "user": auth_response.user}
+
+        # If auth_response.user was None or sign up failed
+        raise HTTPException(status_code=400, detail="Registration failed (Auth service error)")
+
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Catch specific Supabase errors if needed, otherwise generic error
+        logger.error(f"Registration endpoint error for {user.email}: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Registration failed: {str(e)}")
 
 @app.post("/api/users/upload-analyze-resume")
 async def upload_analyze_resume(

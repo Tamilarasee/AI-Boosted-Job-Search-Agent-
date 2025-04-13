@@ -34,8 +34,7 @@ logger = logging.getLogger("job_search_api")
 
 # Load environment variables
 load_dotenv()
-#RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-RAPIDAPI_KEY = ""
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 
 # Add debug logging for API key
 if not RAPIDAPI_KEY:

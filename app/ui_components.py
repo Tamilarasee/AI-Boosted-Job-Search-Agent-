@@ -366,35 +366,36 @@ def job_preferences_form():
                                         else:
                                              st.caption("Match N/A")
 
-                                        analysis = job.get('analysis', {})
-                                        if analysis and any(k in analysis for k in ['missing_skills', 'resume_suggestions']):
-                                            with st.expander("🔍 Show AI Analysis & Tips", expanded=False):
-                                                missing_skills = analysis.get('missing_skills', [])
-                                                if missing_skills:
-                                                    st.markdown("**Missing Skills & Learning Time:**")
-                                                    for item in missing_skills:
-                                                        skill = item.get('skill', 'N/A')
-                                                        estimate = item.get('learn_time_estimate', 'N/A')
-                                                        st.write(f"- **{skill}:** _{estimate}_")
+                                    # --- Moved Expander Here ---
+                                    analysis = job.get('analysis', {})
+                                    if analysis and any(k in analysis for k in ['missing_skills', 'resume_suggestions']):
+                                        with st.expander("🔍 Show AI Analysis & Tips", expanded=False):
+                                            missing_skills = analysis.get('missing_skills', [])
+                                            if missing_skills:
+                                                st.markdown("**Missing Skills & Learning Time:**")
+                                                for item in missing_skills:
+                                                    skill = item.get('skill', 'N/A')
+                                                    estimate = item.get('learn_time_estimate', 'N/A')
+                                                    st.write(f"- **{skill}:** _{estimate}_")
 
-                                                suggestions = analysis.get('resume_suggestions', {})
-                                                highlights = suggestions.get('highlight', [])
-                                                removals = suggestions.get('consider_removing', [])
+                                            suggestions = analysis.get('resume_suggestions', {})
+                                            highlights = suggestions.get('highlight', [])
+                                            removals = suggestions.get('consider_removing', [])
 
-                                                if highlights or removals:
-                                                    st.markdown("**Resume Tailoring Suggestions:**")
-                                                    if highlights:
-                                                        st.markdown("*Consider Highlighting:*")
-                                                        for item in highlights:
-                                                            st.write(f"  - {item}")
-                                                    if removals:
-                                                         st.markdown("*Consider Removing/De-emphasizing:*")
-                                                         for item in removals:
-                                                             st.write(f"  - {item}")
-                                        else:
-                                            # This ensures consistent structure even if analysis is empty/not shown
-                                             st.caption("_AI analysis not available or no specific insights generated._")
-                                        # --- End AI Analysis Section ---
+                                            if highlights or removals:
+                                                st.markdown("**Resume Tailoring Suggestions:**")
+                                                if highlights:
+                                                    st.markdown("*Consider Highlighting:*")
+                                                    for item in highlights:
+                                                        st.write(f"  - {item}")
+                                                if removals:
+                                                     st.markdown("*Consider Removing/De-emphasizing:*")
+                                                     for item in removals:
+                                                         st.write(f"  - {item}")
+                                    else:
+                                        # This ensures consistent structure even if analysis is empty/not shown
+                                         st.caption("_AI analysis not available or no specific insights generated._")
+                                    # --- End Moved Expander ---
                         else:
                             st.error(f"Failed to fetch job results ({response.status_code}): {response.text}")
                     except Exception as e:
